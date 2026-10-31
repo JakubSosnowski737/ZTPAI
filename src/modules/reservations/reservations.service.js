@@ -62,6 +62,8 @@ function createReservationsService({ runInTransaction, now = () => new Date() })
         throw new ConflictError("Room capacity exceeded", "ROOM_CAPACITY_EXCEEDED");
       }
 
+      await rooms.lockById(room.id);
+
       const roomReservations = await reservations.findAll({ roomId: room.id });
       const isBooked = roomReservations.some(
         r => r.status === "CONFIRMED" && overlaps(r, { startTime, endTime })
