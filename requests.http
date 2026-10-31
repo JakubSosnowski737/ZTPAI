@@ -1,0 +1,204 @@
+### Zadanie 1 - sala o ID 1 (200)
+GET http://localhost:3000/api/rooms/1
+
+### Zadanie 1 - rezerwacje sali o ID 4 (200)
+GET http://localhost:3000/api/reservations?roomId=4
+
+### Zadanie 2 - kilka błędów walidacji naraz (400)
+POST http://localhost:3000/api/reservations
+Content-Type: application/json
+
+{
+  "roomId": "1",
+  "reservedBy": "JS",
+  "participants": 0,
+  "startTime": "2026-11-10 10:00",
+  "status": "CONFIRMED"
+}
+
+### Zadanie 2 - niepoprawne ID sali w URL (400)
+GET http://localhost:3000/api/rooms/abc
+
+### Zadanie 2 - niepoprawne roomId w query (400)
+GET http://localhost:3000/api/reservations?roomId=abc
+
+### Zadanie 3 - nieistniejąca ścieżka (404)
+GET http://localhost:3000/api/nope
+
+### Zadanie 3 - niepoprawny JSON (400)
+POST http://localhost:3000/api/reservations
+Content-Type: application/json
+
+{"roomId": 1,
+
+### Zadanie 3 - nieoczekiwany błąd (500)
+GET http://localhost:3000/api/debug/crash
+X-Request-Id: lab02-crash-jakub
+
+### Zadanie 4 - istniejąca rezerwacja 10:00-12:00 (201)
+POST http://localhost:3000/api/reservations
+Content-Type: application/json
+
+{
+  "roomId": 1,
+  "reservedBy": "Jakub Sosnowski",
+  "participants": 20,
+  "startTime": "2026-11-10T10:00:00Z",
+  "endTime": "2026-11-10T12:00:00Z"
+}
+
+### Zadanie 4 - 12:00-13:00 styka się (201)
+POST http://localhost:3000/api/reservations
+Content-Type: application/json
+
+{
+  "roomId": 1,
+  "reservedBy": "Jakub Sosnowski",
+  "participants": 20,
+  "startTime": "2026-11-10T12:00:00Z",
+  "endTime": "2026-11-10T13:00:00Z"
+}
+
+### Zadanie 4 - 08:00-10:00 podane w strefie +01:00 (201)
+POST http://localhost:3000/api/reservations
+Content-Type: application/json
+
+{
+  "roomId": 1,
+  "reservedBy": "Jakub Sosnowski",
+  "participants": 20,
+  "startTime": "2026-11-10T09:00:00+01:00",
+  "endTime": "2026-11-10T11:00:00+01:00"
+}
+
+### Zadanie 4 - 11:00-13:00 nakłada się (409)
+POST http://localhost:3000/api/reservations
+Content-Type: application/json
+
+{
+  "roomId": 1,
+  "reservedBy": "Jakub Sosnowski",
+  "participants": 20,
+  "startTime": "2026-11-10T11:00:00Z",
+  "endTime": "2026-11-10T13:00:00Z"
+}
+
+### Zadanie 4 - 09:00-13:00 zawiera istniejącą (409)
+POST http://localhost:3000/api/reservations
+Content-Type: application/json
+
+{
+  "roomId": 1,
+  "reservedBy": "Jakub Sosnowski",
+  "participants": 20,
+  "startTime": "2026-11-10T09:00:00Z",
+  "endTime": "2026-11-10T13:00:00Z"
+}
+
+### Zadanie 4 - 10:30-11:00 zawiera się w istniejącej (409)
+POST http://localhost:3000/api/reservations
+Content-Type: application/json
+
+{
+  "roomId": 1,
+  "reservedBy": "Jakub Sosnowski",
+  "participants": 20,
+  "startTime": "2026-11-10T10:30:00Z",
+  "endTime": "2026-11-10T11:00:00Z"
+}
+
+### Zadanie 4 - 10:00-12:00 w innej sali (201)
+POST http://localhost:3000/api/reservations
+Content-Type: application/json
+
+{
+  "roomId": 2,
+  "reservedBy": "Jakub Sosnowski",
+  "participants": 15,
+  "startTime": "2026-11-10T10:00:00Z",
+  "endTime": "2026-11-10T12:00:00Z"
+}
+
+### Zadanie 4 - anulowanie rezerwacji 10:00-12:00 (200)
+PATCH http://localhost:3000/api/reservations/2/cancel
+
+### Zadanie 4 - 10:00-12:00 po anulowaniu poprzedniej (201)
+POST http://localhost:3000/api/reservations
+Content-Type: application/json
+
+{
+  "roomId": 1,
+  "reservedBy": "Jakub Sosnowski",
+  "participants": 20,
+  "startTime": "2026-11-10T10:00:00Z",
+  "endTime": "2026-11-10T12:00:00Z"
+}
+
+### Zadanie 4 - endTime przed startTime (400)
+POST http://localhost:3000/api/reservations
+Content-Type: application/json
+
+{
+  "roomId": 1,
+  "reservedBy": "Jakub Sosnowski",
+  "participants": 20,
+  "startTime": "2026-11-11T12:00:00Z",
+  "endTime": "2026-11-11T10:00:00Z"
+}
+
+### Zadanie 4 - rezerwacja krótsza niż 15 minut (400)
+POST http://localhost:3000/api/reservations
+Content-Type: application/json
+
+{
+  "roomId": 1,
+  "reservedBy": "Jakub Sosnowski",
+  "participants": 20,
+  "startTime": "2026-11-11T10:00:00Z",
+  "endTime": "2026-11-11T10:10:00Z"
+}
+
+### Zadanie 4 - startTime w przeszłości (400)
+POST http://localhost:3000/api/reservations
+Content-Type: application/json
+
+{
+  "roomId": 1,
+  "reservedBy": "Jakub Sosnowski",
+  "participants": 20,
+  "startTime": "2026-10-01T10:00:00Z",
+  "endTime": "2026-10-01T12:00:00Z"
+}
+
+### Zadanie 4 - przekroczona pojemność sali (409)
+POST http://localhost:3000/api/reservations
+Content-Type: application/json
+
+{
+  "roomId": 1,
+  "reservedBy": "Jakub Sosnowski",
+  "participants": 40,
+  "startTime": "2026-11-11T10:00:00Z",
+  "endTime": "2026-11-11T12:00:00Z"
+}
+
+### Zadanie 5 - anulowanie przyszłej rezerwacji (200)
+PATCH http://localhost:3000/api/reservations/3/cancel
+
+### Zadanie 5 - ponowne anulowanie tej samej rezerwacji (200)
+PATCH http://localhost:3000/api/reservations/3/cancel
+
+### Zadanie 5 - anulowanie rozpoczętej rezerwacji (409)
+PATCH http://localhost:3000/api/reservations/1/cancel
+
+### Zadanie 5 - nowa rezerwacja z nagłówkiem Location (201)
+POST http://localhost:3000/api/reservations
+Content-Type: application/json
+
+{
+  "roomId": 3,
+  "reservedBy": "Jakub Sosnowski",
+  "participants": 25,
+  "startTime": "2026-11-12T09:00:00Z",
+  "endTime": "2026-11-12T10:30:00Z"
+}
