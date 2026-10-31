@@ -5,7 +5,11 @@ function toIso(date) {
 function toReservationResponse(reservation) {
   return {
     id: reservation.id,
-    roomId: reservation.roomId,
+    room: {
+      id: reservation.room.id,
+      name: reservation.room.name,
+      building: { id: reservation.room.building.id, name: reservation.room.building.name }
+    },
     reservedBy: reservation.reservedBy,
     participants: reservation.participants,
     startTime: toIso(reservation.startTime),
