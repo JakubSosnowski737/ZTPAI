@@ -4,14 +4,20 @@ const SORT_COLUMNS = {
   participants: "r.participants"
 };
 
-const COLUMNS = ["r.*", "rm.name as room_name", "rm.building_id", "b.name as building_name"];
+const COLUMNS = [
+  "r.*",
+  "rm.name as room_name",
+  "rm.building_id",
+  "b.name as building_name",
+  "u.email as user_email"
+];
 
 function toReservation(row) {
   if (!row) return null;
   return {
     id: row.id,
     roomId: row.room_id,
-    reservedBy: row.reserved_by,
+    userId: row.user_id,
     participants: row.participants,
     startTime: row.start_time,
     endTime: row.end_time,
@@ -22,13 +28,15 @@ function toReservation(row) {
       id: row.room_id,
       name: row.room_name,
       building: { id: row.building_id, name: row.building_name }
-    }
+    },
+    user: { id: row.user_id, email: row.user_email }
   };
 }
 
-function applyFilters(query, { roomId, buildingId, status, from, to }) {
+function applyFilters(query, { roomId, buildingId, userId, status, from, to }) {
   if (roomId) query.where("r.room_id", roomId);
   if (buildingId) query.where("rm.building_id", buildingId);
+  if (userId) query.where("r.user_id", userId);
   if (status) query.where("r.status", status);
   if (from) query.where("r.end_time", ">", from);
   if (to) query.where("r.start_time", "<", to);
@@ -36,25 +44,26 @@ function applyFilters(query, { roomId, buildingId, status, from, to }) {
 }
 
 function createReservationsRepository(db) {
-  function withRoomAndBuilding() {
+  function withRelations() {
     return db("reservations as r")
       .join("rooms as rm", "rm.id", "r.room_id")
-      .join("buildings as b", "b.id", "rm.building_id");
+      .join("buildings as b", "b.id", "rm.building_id")
+      .join("users as u", "u.id", "r.user_id");
   }
 
   async function findById(id) {
-    return toReservation(await withRoomAndBuilding().select(COLUMNS).where("r.id", id).first());
+    return toReservation(await withRelations().select(COLUMNS).where("r.id", id).first());
   }
 
   async function findAll(filters = {}) {
-    const rows = await applyFilters(withRoomAndBuilding().select(COLUMNS), filters).orderBy("r.id");
+    const rows = await applyFilters(withRelations().select(COLUMNS), filters).orderBy("r.id");
     return rows.map(toReservation);
   }
 
   async function list({ page, limit, sort, ...filters }) {
     const desc = sort.startsWith("-");
     const column = SORT_COLUMNS[desc ? sort.slice(1) : sort];
-    const base = applyFilters(withRoomAndBuilding(), filters);
+    const base = applyFilters(withRelations(), filters);
 
     const [rows, { count }] = await Promise.all([
       base.clone()
@@ -73,7 +82,7 @@ function createReservationsRepository(db) {
     const [row] = await db("reservations")
       .insert({
         room_id: data.roomId,
-        reserved_by: data.reservedBy,
+        user_id: data.userId,
         participants: data.participants,
         start_time: data.startTime,
         end_time: data.endTime,

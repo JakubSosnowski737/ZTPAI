@@ -1,4 +1,4 @@
-const { NotFoundError } = require("../../errors/AppError");
+const { NotFoundError, ConflictError } = require("../../errors/AppError");
 
 function createBuildingsService({ runInTransaction }) {
   async function listBuildings() {
@@ -25,7 +25,29 @@ function createBuildingsService({ runInTransaction }) {
     return runInTransaction(({ buildings }) => buildings.create(input));
   }
 
-  return { listBuildings, getBuilding, listBuildingRooms, createBuilding };
+  async function updateBuilding(id, changes) {
+    return runInTransaction(async ({ buildings }) => {
+      const building = await buildings.findById(id);
+      if (!building) throw new NotFoundError("Building");
+      return buildings.update(id, changes);
+    });
+  }
+
+  async function deleteBuilding(id) {
+    return runInTransaction(async ({ buildings, rooms }) => {
+      const building = await buildings.findById(id);
+      if (!building) throw new NotFoundError("Building");
+
+      const buildingRooms = await rooms.findByBuildingId(id);
+      if (buildingRooms.length > 0) {
+        throw new ConflictError("Building still has rooms", "BUILDING_HAS_ROOMS");
+      }
+
+      await buildings.remove(id);
+    });
+  }
+
+  return { listBuildings, getBuilding, listBuildingRooms, createBuilding, updateBuilding, deleteBuilding };
 }
 
 module.exports = { createBuildingsService };

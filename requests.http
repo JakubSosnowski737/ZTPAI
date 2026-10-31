@@ -1,4 +1,188 @@
-### Zadanie 2 - nowy budynek (201)
+### Logowanie - ADMIN (zapisuje adminToken)
+POST http://localhost:3000/api/auth/login
+Content-Type: application/json
+
+{
+  "email": "admin@example.com",
+  "password": "admin-password-123"
+}
+
+> {%
+  client.global.set("adminToken", response.body.accessToken);
+%}
+
+### Logowanie - Jakub Sosnowski, USER (zapisuje jakubToken)
+POST http://localhost:3000/api/auth/login
+Content-Type: application/json
+
+{
+  "email": "jakub.sosnowski@example.com",
+  "password": "jakub-password-123"
+}
+
+> {%
+  var token = response.body.accessToken;
+  var parts = token.split(".");
+  var changed = parts[2].charAt(0) === "A" ? "B" : "A";
+  client.global.set("jakubToken", token);
+  client.global.set("jakubSignature", parts[2]);
+  client.global.set("badSignatureToken", parts[0] + "." + parts[1] + "." + changed + parts[2].slice(1));
+%}
+
+### Logowanie - Anna Nowak, USER (zapisuje annaToken)
+POST http://localhost:3000/api/auth/login
+Content-Type: application/json
+
+{
+  "email": "anna.nowak@example.com",
+  "password": "anna-password-123"
+}
+
+> {%
+  client.global.set("annaToken", response.body.accessToken);
+%}
+
+### Zadanie 1 - rejestracja nowego użytkownika (201)
+POST http://localhost:3000/api/auth/register
+Content-Type: application/json
+
+{
+  "email": "Jan.Kowalski@example.com",
+  "password": "bardzo-dlugie-haslo"
+}
+
+### Zadanie 1 - rejestracja z rolą ADMIN (400)
+POST http://localhost:3000/api/auth/register
+Content-Type: application/json
+
+{
+  "email": "nowy.admin@example.com",
+  "password": "bardzo-dlugie-haslo",
+  "role": "ADMIN"
+}
+
+### Zadanie 1 - zbyt krótkie hasło (400)
+POST http://localhost:3000/api/auth/register
+Content-Type: application/json
+
+{
+  "email": "krotkie.haslo@example.com",
+  "password": "krotkie"
+}
+
+### Zadanie 1 - ten sam email innymi wielkimi literami (409 EMAIL_TAKEN)
+POST http://localhost:3000/api/auth/register
+Content-Type: application/json
+
+{
+  "email": "JAN.KOWALSKI@EXAMPLE.COM",
+  "password": "inne-dlugie-haslo"
+}
+
+### Zadanie 2 - logowanie nowego użytkownika (200)
+POST http://localhost:3000/api/auth/login
+Content-Type: application/json
+
+{
+  "email": "jan.kowalski@example.com",
+  "password": "bardzo-dlugie-haslo"
+}
+
+> {%
+  client.global.set("janToken", response.body.accessToken);
+%}
+
+### Zadanie 2 - zły email (401)
+POST http://localhost:3000/api/auth/login
+Content-Type: application/json
+
+{
+  "email": "nie.ma.takiego@example.com",
+  "password": "bardzo-dlugie-haslo"
+}
+
+### Zadanie 2 - złe hasło (401)
+POST http://localhost:3000/api/auth/login
+Content-Type: application/json
+
+{
+  "email": "jan.kowalski@example.com",
+  "password": "zle-haslo-12345"
+}
+
+### Zadanie 2 - dane zalogowanego użytkownika (200)
+GET http://localhost:3000/api/auth/me
+Authorization: Bearer {{janToken}}
+
+### Zadanie 3 - brak nagłówka Authorization (401)
+GET http://localhost:3000/api/reservations
+
+### Zadanie 3 - nagłówek Basic zamiast Bearer (401)
+GET http://localhost:3000/api/reservations
+Authorization: Basic amFrdWI6aGFzbG8=
+
+### Zadanie 3 - Bearer bez tokenu (401)
+GET http://localhost:3000/api/reservations
+Authorization: Bearer
+
+### Zadanie 3 - token ze zmienionym znakiem w podpisie (401)
+GET http://localhost:3000/api/reservations
+Authorization: Bearer {{badSignatureToken}}
+
+### Zadanie 3 - token ze zmienionym payloadem (role ADMIN) i oryginalnym podpisem (401)
+GET http://localhost:3000/api/reservations
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoiQURNSU4iLCJpYXQiOjE3OTM1MjAwMDAsImV4cCI6MTc5MzUyMDkwMCwic3ViIjoiMiJ9.{{jakubSignature}}
+
+### Zadanie 3 - nowa rezerwacja, userId z tokenu (201)
+POST http://localhost:3000/api/reservations
+Authorization: Bearer {{jakubToken}}
+Content-Type: application/json
+
+{
+  "roomId": 3,
+  "participants": 10,
+  "startTime": "2026-11-25T10:00:00Z",
+  "endTime": "2026-11-25T12:00:00Z"
+}
+
+### Zadanie 3 - userId w body (400)
+POST http://localhost:3000/api/reservations
+Authorization: Bearer {{jakubToken}}
+Content-Type: application/json
+
+{
+  "roomId": 3,
+  "participants": 10,
+  "startTime": "2026-11-26T10:00:00Z",
+  "endTime": "2026-11-26T12:00:00Z",
+  "userId": 3
+}
+
+### Zadanie 3 - reservedBy w body (400)
+POST http://localhost:3000/api/reservations
+Authorization: Bearer {{jakubToken}}
+Content-Type: application/json
+
+{
+  "roomId": 3,
+  "participants": 10,
+  "startTime": "2026-11-26T10:00:00Z",
+  "endTime": "2026-11-26T12:00:00Z",
+  "reservedBy": "Anna Nowak"
+}
+
+### Zadanie 4 - GET /api/buildings - brak tokenu (401)
+GET http://localhost:3000/api/buildings
+
+### Zadanie 4 - GET /api/buildings - USER (200)
+GET http://localhost:3000/api/buildings
+Authorization: Bearer {{jakubToken}}
+
+### Zadanie 4 - GET /api/buildings - ADMIN (200)
+GET http://localhost:3000/api/buildings
+Authorization: Bearer {{adminToken}}
+
+### Zadanie 4 - POST /api/buildings - brak tokenu (401)
 POST http://localhost:3000/api/buildings
 Content-Type: application/json
 
@@ -7,145 +191,301 @@ Content-Type: application/json
   "address": "ul. Jana Pawła II 37, Kraków"
 }
 
-### Zadanie 2 - budynek o istniejącej nazwie (409)
+### Zadanie 4 - POST /api/buildings - USER (403)
 POST http://localhost:3000/api/buildings
+Authorization: Bearer {{jakubToken}}
 Content-Type: application/json
 
 {
-  "name": "Budynek A",
-  "address": "ul. Inna 1, Kraków"
+  "name": "Budynek D",
+  "address": "ul. Jana Pawła II 37, Kraków"
 }
 
-### Zadanie 2 - budynek bez adresu (400)
+### Zadanie 4 - POST /api/buildings - ADMIN (201)
 POST http://localhost:3000/api/buildings
+Authorization: Bearer {{adminToken}}
 Content-Type: application/json
 
 {
-  "name": "Budynek E"
+  "name": "Budynek D",
+  "address": "ul. Jana Pawła II 37, Kraków"
 }
 
-### Zadanie 2 - nowa sala w budynku A (201)
-POST http://localhost:3000/api/rooms
+### Zadanie 4 - PATCH /api/buildings/4 - brak tokenu (401)
+PATCH http://localhost:3000/api/buildings/4
 Content-Type: application/json
 
 {
-  "buildingId": 1,
-  "name": "301",
-  "capacity": 40
+  "address": "ul. Jana Pawła II 39, Kraków"
 }
 
-### Zadanie 2 - sala w nieistniejącym budynku (404)
-POST http://localhost:3000/api/rooms
+### Zadanie 4 - PATCH /api/buildings/4 - USER (403)
+PATCH http://localhost:3000/api/buildings/4
+Authorization: Bearer {{jakubToken}}
 Content-Type: application/json
 
 {
-  "buildingId": 99,
-  "name": "101",
-  "capacity": 30
+  "address": "ul. Jana Pawła II 39, Kraków"
 }
 
-### Zadanie 2 - sala o istniejącej nazwie w tym samym budynku (409)
-POST http://localhost:3000/api/rooms
+### Zadanie 4 - PATCH /api/buildings/4 - ADMIN (200)
+PATCH http://localhost:3000/api/buildings/4
+Authorization: Bearer {{adminToken}}
 Content-Type: application/json
 
 {
-  "buildingId": 1,
-  "name": "101",
-  "capacity": 30
+  "address": "ul. Jana Pawła II 39, Kraków"
 }
 
-### Zadanie 2 - budynek D po restarcie serwera (200)
-GET http://localhost:3000/api/buildings/4
+### Zadanie 4 - DELETE /api/buildings/4 - brak tokenu (401)
+DELETE http://localhost:3000/api/buildings/4
 
-### Zadanie 3 - sala razem z budynkiem (200)
+### Zadanie 4 - DELETE /api/buildings/4 - USER (403)
+DELETE http://localhost:3000/api/buildings/4
+Authorization: Bearer {{jakubToken}}
+
+### Zadanie 4 - DELETE /api/buildings/4 - ADMIN (204)
+DELETE http://localhost:3000/api/buildings/4
+Authorization: Bearer {{adminToken}}
+
+### Zadanie 4 - GET /api/rooms/1 - brak tokenu (401)
 GET http://localhost:3000/api/rooms/1
 
-### Zadanie 3 - budynki z liczbą sal (200)
-GET http://localhost:3000/api/buildings
+### Zadanie 4 - GET /api/rooms/1 - USER (200)
+GET http://localhost:3000/api/rooms/1
+Authorization: Bearer {{jakubToken}}
 
-### Zadanie 3 - sale budynku A (200)
-GET http://localhost:3000/api/buildings/1/rooms
+### Zadanie 4 - GET /api/rooms/1 - ADMIN (200)
+GET http://localhost:3000/api/rooms/1
+Authorization: Bearer {{adminToken}}
 
-### Zadanie 3 - budynek bez sal (pusta tablica)
-GET http://localhost:3000/api/buildings/3/rooms
+### Zadanie 4 - POST /api/rooms - brak tokenu (401)
+POST http://localhost:3000/api/rooms
+Content-Type: application/json
 
-### Zadanie 3 - sale nieistniejącego budynku (404)
-GET http://localhost:3000/api/buildings/99/rooms
+{
+  "buildingId": 3,
+  "name": "C1",
+  "capacity": 25
+}
 
-### Zadanie 3 - rezerwacja z salą i budynkiem (200)
-GET http://localhost:3000/api/reservations/1
+### Zadanie 4 - POST /api/rooms - USER (403)
+POST http://localhost:3000/api/rooms
+Authorization: Bearer {{jakubToken}}
+Content-Type: application/json
 
-### Zadanie 3 - lista rezerwacji (200)
+{
+  "buildingId": 3,
+  "name": "C1",
+  "capacity": 25
+}
+
+### Zadanie 4 - POST /api/rooms - ADMIN (201)
+POST http://localhost:3000/api/rooms
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{
+  "buildingId": 3,
+  "name": "C1",
+  "capacity": 25
+}
+
+### Zadanie 4 - PATCH /api/rooms/6 - brak tokenu (401)
+PATCH http://localhost:3000/api/rooms/6
+Content-Type: application/json
+
+{
+  "capacity": 35
+}
+
+### Zadanie 4 - PATCH /api/rooms/6 - USER (403)
+PATCH http://localhost:3000/api/rooms/6
+Authorization: Bearer {{jakubToken}}
+Content-Type: application/json
+
+{
+  "capacity": 35
+}
+
+### Zadanie 4 - PATCH /api/rooms/6 - ADMIN (200)
+PATCH http://localhost:3000/api/rooms/6
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{
+  "capacity": 35
+}
+
+### Zadanie 4 - DELETE /api/rooms/6 - brak tokenu (401)
+DELETE http://localhost:3000/api/rooms/6
+
+### Zadanie 4 - DELETE /api/rooms/6 - USER (403)
+DELETE http://localhost:3000/api/rooms/6
+Authorization: Bearer {{jakubToken}}
+
+### Zadanie 4 - DELETE /api/rooms/6 - ADMIN (204)
+DELETE http://localhost:3000/api/rooms/6
+Authorization: Bearer {{adminToken}}
+
+### Zadanie 4 - GET /api/reservations - brak tokenu (401)
 GET http://localhost:3000/api/reservations
 
-### Zadanie 4 - rezerwacje sali 1
-GET http://localhost:3000/api/reservations?roomId=1
+### Zadanie 4 - GET /api/reservations - USER Jakub widzi tylko swoje (200)
+GET http://localhost:3000/api/reservations
+Authorization: Bearer {{jakubToken}}
 
-### Zadanie 4 - budynek A, tylko CONFIRMED, od najpóźniejszej
-GET http://localhost:3000/api/reservations?buildingId=1&status=CONFIRMED&sort=-startTime
+### Zadanie 4 - GET /api/reservations - USER Anna widzi tylko swoje (200)
+GET http://localhost:3000/api/reservations
+Authorization: Bearer {{annaToken}}
 
-### Zadanie 4 - rezerwacje nakładające się na 11:00-11:30
-GET http://localhost:3000/api/reservations?from=2026-11-10T11:00:00Z&to=2026-11-10T11:30:00Z
+### Zadanie 4 - GET /api/reservations - ADMIN widzi wszystkie (200)
+GET http://localhost:3000/api/reservations
+Authorization: Bearer {{adminToken}}
 
-### Zadanie 4 - druga strona po 2 rezerwacje, wg liczby uczestników malejąco
-GET http://localhost:3000/api/reservations?page=2&limit=2&sort=-participants
+### Zadanie 4 - GET /api/reservations?userId=3 - brak tokenu (401)
+GET http://localhost:3000/api/reservations?userId=3
 
-### Zadanie 4 - wszystkie parametry naraz
-GET http://localhost:3000/api/reservations?roomId=1&status=CONFIRMED&from=2026-11-01T00:00:00Z&to=2026-11-30T23:59:59Z&page=1&limit=10&sort=-startTime
+### Zadanie 4 - GET /api/reservations?userId=3 - USER Jakub (403)
+GET http://localhost:3000/api/reservations?userId=3
+Authorization: Bearer {{jakubToken}}
 
-### Zadanie 4 - strona poza zakresem (200, pusta tablica)
-GET http://localhost:3000/api/reservations?page=99
+### Zadanie 4 - GET /api/reservations?userId=3 - USER Anna (403)
+GET http://localhost:3000/api/reservations?userId=3
+Authorization: Bearer {{annaToken}}
 
-### Zadanie 4 - nieznane sortowanie (400)
-GET http://localhost:3000/api/reservations?sort=name
+### Zadanie 4 - GET /api/reservations?userId=3 - ADMIN (200)
+GET http://localhost:3000/api/reservations?userId=3
+Authorization: Bearer {{adminToken}}
 
-### Zadanie 4 - from późniejsze niż to (400)
-GET http://localhost:3000/api/reservations?from=2026-11-11T00:00:00Z&to=2026-11-10T00:00:00Z
-
-### Zadanie 5 - nowa rezerwacja (201)
-POST http://localhost:3000/api/reservations
-Content-Type: application/json
-
-{
-  "roomId": 3,
-  "reservedBy": "Jakub Sosnowski",
-  "participants": 10,
-  "startTime": "2026-11-21T10:00:00Z",
-  "endTime": "2026-11-21T12:00:00Z"
-}
-
-### Zadanie 5 - ta sama sala i ten sam czas (409)
-POST http://localhost:3000/api/reservations
-Content-Type: application/json
-
-{
-  "roomId": 3,
-  "reservedBy": "Jakub Sosnowski",
-  "participants": 10,
-  "startTime": "2026-11-21T10:00:00Z",
-  "endTime": "2026-11-21T12:00:00Z"
-}
-
-### Zadanie 5 - termin anulowanej rezerwacji jest wolny (201)
-POST http://localhost:3000/api/reservations
-Content-Type: application/json
-
-{
-  "roomId": 2,
-  "reservedBy": "Jakub Sosnowski",
-  "participants": 15,
-  "startTime": "2026-11-12T09:00:00Z",
-  "endTime": "2026-11-12T10:30:00Z"
-}
-
-### Zadanie 5 - rezerwacja stykająca się z inną (201)
+### Zadanie 4 - POST /api/reservations - brak tokenu (401)
 POST http://localhost:3000/api/reservations
 Content-Type: application/json
 
 {
   "roomId": 1,
-  "reservedBy": "Jakub Sosnowski",
-  "participants": 20,
-  "startTime": "2026-11-10T13:00:00Z",
-  "endTime": "2026-11-10T14:00:00Z"
+  "participants": 5,
+  "startTime": "2026-11-28T10:00:00Z",
+  "endTime": "2026-11-28T11:00:00Z"
 }
+
+### Zadanie 4 - POST /api/reservations - USER Jakub (201)
+POST http://localhost:3000/api/reservations
+Authorization: Bearer {{jakubToken}}
+Content-Type: application/json
+
+{
+  "roomId": 1,
+  "participants": 5,
+  "startTime": "2026-11-28T10:00:00Z",
+  "endTime": "2026-11-28T11:00:00Z"
+}
+
+### Zadanie 4 - POST /api/reservations - USER Anna (201)
+POST http://localhost:3000/api/reservations
+Authorization: Bearer {{annaToken}}
+Content-Type: application/json
+
+{
+  "roomId": 2,
+  "participants": 12,
+  "startTime": "2026-11-26T09:00:00Z",
+  "endTime": "2026-11-26T10:00:00Z"
+}
+
+### Zadanie 4 - POST /api/reservations - ADMIN (201)
+POST http://localhost:3000/api/reservations
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{
+  "roomId": 4,
+  "participants": 60,
+  "startTime": "2026-11-27T10:00:00Z",
+  "endTime": "2026-11-27T12:00:00Z"
+}
+
+### Zadanie 4 - GET /api/reservations/1 - brak tokenu (401)
+GET http://localhost:3000/api/reservations/1
+
+### Zadanie 4 - GET /api/reservations/1 - USER właściciel (200)
+GET http://localhost:3000/api/reservations/1
+Authorization: Bearer {{jakubToken}}
+
+### Zadanie 4 - GET /api/reservations/1 - USER obcy (404)
+GET http://localhost:3000/api/reservations/1
+Authorization: Bearer {{annaToken}}
+
+### Zadanie 4 - GET /api/reservations/1 - ADMIN (200)
+GET http://localhost:3000/api/reservations/1
+Authorization: Bearer {{adminToken}}
+
+### Zadanie 4 - PATCH /api/reservations/7/cancel - brak tokenu (401)
+PATCH http://localhost:3000/api/reservations/7/cancel
+
+### Zadanie 4 - PATCH /api/reservations/7/cancel - USER obcy (404)
+PATCH http://localhost:3000/api/reservations/7/cancel
+Authorization: Bearer {{annaToken}}
+
+### Zadanie 4 - PATCH /api/reservations/7/cancel - USER właściciel (200)
+PATCH http://localhost:3000/api/reservations/7/cancel
+Authorization: Bearer {{jakubToken}}
+
+### Zadanie 4 - PATCH /api/reservations/8/cancel - ADMIN anuluje rezerwację Anny (200)
+PATCH http://localhost:3000/api/reservations/8/cancel
+Authorization: Bearer {{adminToken}}
+
+### Zadanie 4 - GET /api/auth/me - brak tokenu (401)
+GET http://localhost:3000/api/auth/me
+
+### Zadanie 4 - GET /api/auth/me - USER (200)
+GET http://localhost:3000/api/auth/me
+Authorization: Bearer {{jakubToken}}
+
+### Zadanie 4 - GET /api/auth/me - ADMIN (200)
+GET http://localhost:3000/api/auth/me
+Authorization: Bearer {{adminToken}}
+
+### Zadanie 4 - ADMIN nie anuluje rozpoczętej rezerwacji (409)
+PATCH http://localhost:3000/api/reservations/4/cancel
+Authorization: Bearer {{adminToken}}
+
+### Zadanie 4 - ADMIN nie zarezerwuje zajętej sali (409)
+POST http://localhost:3000/api/reservations
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{
+  "roomId": 1,
+  "participants": 10,
+  "startTime": "2026-11-10T10:30:00Z",
+  "endTime": "2026-11-10T11:00:00Z"
+}
+
+### Zadanie 4 - ADMIN nie przekroczy pojemności sali (409)
+POST http://localhost:3000/api/reservations
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{
+  "roomId": 1,
+  "participants": 40,
+  "startTime": "2026-11-29T10:00:00Z",
+  "endTime": "2026-11-29T11:00:00Z"
+}
+
+### Zadanie 4 - ADMIN nie usunie budynku z salami (409)
+DELETE http://localhost:3000/api/buildings/1
+Authorization: Bearer {{adminToken}}
+
+### Zadanie 4 - ADMIN nie usunie sali z rezerwacjami (409)
+DELETE http://localhost:3000/api/rooms/1
+Authorization: Bearer {{adminToken}}
+
+### Zadanie 4 - USER z filtrami i paginacją nadal widzi tylko swoje (200)
+GET http://localhost:3000/api/reservations?status=CONFIRMED&sort=-startTime&page=1&limit=2
+Authorization: Bearer {{jakubToken}}
+
+### Zadanie 4 - ADMIN z filtrem userId i statusem (200)
+GET http://localhost:3000/api/reservations?userId=2&status=CONFIRMED
+Authorization: Bearer {{adminToken}}

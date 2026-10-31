@@ -35,10 +35,21 @@ function createRoomsRepository(store) {
     return withBuilding(room);
   }
 
+  async function update(id, { name, capacity }) {
+    const room = store.rooms.find(r => r.id === id);
+    if (name !== undefined) room.name = name;
+    if (capacity !== undefined) room.capacity = capacity;
+    return withBuilding(room);
+  }
+
+  async function remove(id) {
+    store.rooms = store.rooms.filter(r => r.id !== id);
+  }
+
   async function lockById() {
   }
 
-  return { findAll, findById, findByBuildingId, create, lockById };
+  return { findAll, findById, findByBuildingId, create, update, remove, lockById };
 }
 
 module.exports = { roomsSeed, createRoomsRepository };

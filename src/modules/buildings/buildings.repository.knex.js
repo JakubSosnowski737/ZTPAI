@@ -28,7 +28,16 @@ function createBuildingsRepository(db) {
     return toBuilding(row);
   }
 
-  return { findAll, findById, create };
+  async function update(id, { name, address }) {
+    const [row] = await db("buildings").where({ id }).update({ name, address }).returning("*");
+    return toBuilding(row);
+  }
+
+  async function remove(id) {
+    await db("buildings").where({ id }).del();
+  }
+
+  return { findAll, findById, create, update, remove };
 }
 
 module.exports = { createBuildingsRepository };
