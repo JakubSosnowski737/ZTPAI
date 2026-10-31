@@ -90,6 +90,9 @@ GET http://localhost:3000/api/reservations?from=2026-11-10T11:00:00Z&to=2026-11-
 ### Zadanie 4 - druga strona po 2 rezerwacje, wg liczby uczestników malejąco
 GET http://localhost:3000/api/reservations?page=2&limit=2&sort=-participants
 
+### Zadanie 4 - wszystkie parametry naraz
+GET http://localhost:3000/api/reservations?roomId=1&status=CONFIRMED&from=2026-11-01T00:00:00Z&to=2026-11-30T23:59:59Z&page=1&limit=10&sort=-startTime
+
 ### Zadanie 4 - strona poza zakresem (200, pusta tablica)
 GET http://localhost:3000/api/reservations?page=99
 
