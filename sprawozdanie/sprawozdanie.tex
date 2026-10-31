@@ -1,0 +1,661 @@
+\documentclass[12pt,a4paper]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[polish]{babel}
+\usepackage{lmodern}
+\usepackage[margin=2.5cm]{geometry}
+\usepackage{graphicx}
+\usepackage{float}
+\usepackage{fvextra}
+
+\setlength{\emergencystretch}{3em}
+
+\DefineVerbatimEnvironment{terminal}{Verbatim}{breaklines,fontsize=\footnotesize,frame=single,framesep=2mm}
+
+\newcommand{\zrzut}[2]{%
+  \begin{figure}[H]
+    \centering
+    \IfFileExists{#1}{\def\plik{#1}}{\def\plik{img/#1}}%
+    \IfFileExists{\plik}
+      {\includegraphics[width=0.9\textwidth,height=0.6\textheight,keepaspectratio]{\plik}}
+      {\fbox{\parbox[c][3cm][c]{0.85\textwidth}{\centering Miejsce na zrzut ekranu\\[4pt]\texttt{#1}}}}
+    \caption{#2}
+  \end{figure}%
+}
+
+\title{Sprawozdanie z laboratorium nr 4\\[6pt]\large ZPAI -- Zadanie 04: Room Booking API -- authentication, authorization i konfiguracja}
+\author{Jakub Sosnowski 151935}
+\date{\today}
+
+\begin{document}
+
+\maketitle
+
+\section*{Opis rozwiązania}
+
+API z zadania 03 dostało konta użytkowników z hasłami w bcrypt, logowanie tokenem JWT, middleware \texttt{authenticate} i \texttt{authorize} oraz sprawdzanie właściciela rezerwacji w service. Rezerwacje są teraz powiązane z kontem przez \texttt{user\_id}, konfiguracja jest sprawdzana przy starcie schematem Zod, a dokumentacja API jest w Swagger UI pod \texttt{/api/docs}.
+
+Endpointy testowałem w IntelliJ IDEA plikiem \texttt{requests.http}: po \texttt{npm run seed} requesty idą po kolei od góry, a trzy pierwsze logują ADMINa, Jakuba i Annę i zapisują ich tokeny. Wygasły token jest w osobnym pliku \texttt{expired-token.http}, a wyniki z terminala wkleiłem jako tekst. Repositories in-memory też dostały użytkowników, więc w trybie \texttt{npm run start:memory} cały \texttt{requests.http} daje te same statusy co na PostgreSQL.
+
+{\small
+\begin{verbatim}
+LAB04/
++-- .env.example
++-- docker-compose.yml          (baza na porcie 5433)
++-- knexfile.js                 (bierze DATABASE_URL z src/config)
++-- requests.http
++-- expired-token.http
++-- scripts/
+|   +-- double-booking.js
+|   +-- parallel-register.js
++-- src/
+    +-- app.js
+    +-- server.js
+    +-- config/
+    |   +-- index.js
+    +-- docs/
+    |   +-- openapi.js
+    +-- db/
+    |   +-- migrations/
+    |   |   +-- 20261108100000_create_users.js
+    |   |   +-- 20261108110000_replace_reserved_by_with_user_id.js
+    |   +-- seeds/
+    |       +-- 01_users.js
+    |       +-- 02_buildings_rooms_reservations.js
+    +-- middleware/
+    |   +-- authenticate.js
+    |   +-- authorize.js
+    +-- modules/
+        +-- auth/           (routes, controller, service, schemas, mapper,
+        |                    users.repository.knex.js, users.repository.memory.js)
+        +-- buildings/
+        +-- rooms/
+        +-- reservations/
+\end{verbatim}
+}
+
+Uruchomienie projektu:
+
+\begin{terminal}
+npm install
+npm run db:up       (PostgreSQL 16 na porcie 5433, żeby nie kolidował z bazą z zadania 03)
+npm run migrate
+npm run seed        (admin@example.com, jakub.sosnowski@example.com, anna.nowak@example.com)
+npm start           (Swagger UI: http://localhost:3000/api/docs)
+\end{terminal}
+
+Hasła kont testowych są w seedzie \texttt{src/db/seeds/01\_users.js}, a seed z budynkami, salami i rezerwacjami ma teraz numer 02, bo rezerwacje wymagają już istniejących użytkowników.
+
+\begin{terminal}
+> docker compose ps
+NAME         IMAGE         STATUS       PORTS
+lab04-db-1   postgres:16   Up 4 hours   0.0.0.0:5433->5432/tcp, [::]:5433->5432/tcp
+
+> docker volume ls --filter name=lab04
+DRIVER    VOLUME NAME
+local     lab04_pgdata
+\end{terminal}
+
+\section*{Zadanie 1 -- Rejestracja}
+
+Tabelę \texttt{users} tworzy nowa migracja, z unikalnym \texttt{email} i CHECK-iem na dozwolone role. Starych migracji z zadania 03 nie zmieniałem.
+
+\zrzut{zad1-migracja.png}{Migracja \texttt{20261108100000\_create\_users.js}}
+
+\begin{terminal}[fontsize=\fontsize{7.5}{9}\selectfont]
+roombooking=# \d users
+                                        Table "public.users"
+    Column     |           Type           | Collation | Nullable |              Default
+---------------+--------------------------+-----------+----------+-----------------------------------
+ id            | integer                  |           | not null | nextval('users_id_seq'::regclass)
+ email         | character varying(254)   |           | not null |
+ password_hash | character varying(100)   |           | not null |
+ role          | character varying(20)    |           | not null | 'USER'::character varying
+ created_at    | timestamp with time zone |           | not null | CURRENT_TIMESTAMP
+Indexes:
+    "users_pkey" PRIMARY KEY, btree (id)
+    "users_email_unique" UNIQUE CONSTRAINT, btree (email)
+Check constraints:
+    "users_role_check" CHECK (role::text = ANY (ARRAY['USER'::character varying, 'ADMIN'::character varying]::text[]))
+Referenced by:
+    TABLE "reservations" CONSTRAINT "reservations_user_id_foreign" FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE RESTRICT
+\end{terminal}
+
+Schemat Zod sprawdza email i zamienia go na małe litery, a hasło musi mieć od 10 do 72 znaków, bo bcrypt bierze pod uwagę tylko pierwsze 72 bajty. Dzięki \texttt{.strict()} każde nieznane pole, także \texttt{role}, kończy się błędem 400.
+
+\zrzut{zad1-schemas.png}{Schematy \texttt{registerBody} i \texttt{loginBody} w \texttt{auth.schemas.js}}
+
+Service sprawdza, czy email jest wolny, hashuje hasło bcryptem z cost factor 12 i zawsze ustawia rolę \texttt{USER}. Odpowiedź przechodzi przez mapper, który nie ma pola z hashem, więc hash nigdy nie trafia do klienta.
+
+\zrzut{zad1-register.png}{Funkcja \texttt{register} w \texttt{auth.service.js}}
+
+\zrzut{zad1-mapper.png}{Mapper \texttt{toUserResponse} -- odpowiedź bez \texttt{passwordHash}}
+
+Sprawdzenie w service to znowu check-then-act, więc przy równoległych rejestracjach gwarancję daje dopiero UNIQUE w bazie. \texttt{errorHandler} rozpoznaje błąd 23505 po nazwie constraintu \texttt{users\_email\_unique} i zwraca ten sam 409 \texttt{EMAIL\_TAKEN}.
+
+\zrzut{zad1-errorhandler.png}{Mapowanie constraintu \texttt{users\_email\_unique} na 409 \texttt{EMAIL\_TAKEN} w \texttt{errorHandler.js}}
+
+Konto ADMIN powstaje tylko w seedzie, bo rejestracja przez API zawsze daje rolę \texttt{USER}.
+
+\zrzut{zad1-seed.png}{Seed \texttt{01\_users.js} -- konto ADMIN i dwóch użytkowników z hasłami w bcrypt}
+
+Wiersze z tabeli \texttt{users} po rejestracji Jana Kowalskiego -- w bazie jest tylko hash bcrypt (\texttt{\$2b\$12\$...}, czyli cost factor 12), a email zapisał się małymi literami:
+
+\begin{terminal}[fontsize=\fontsize{7.5}{9}\selectfont]
+roombooking=# SELECT id, email, password_hash, role FROM users ORDER BY id;
+ id |            email            |                        password_hash                         | role
+----+-----------------------------+--------------------------------------------------------------+-------
+  1 | admin@example.com           | $2b$12$ojoE6aqTgs/t.dA.Fi2TGu/eAryjQpyBEOj/E4Pn1ytSAgxguw4Ke | ADMIN
+  2 | jakub.sosnowski@example.com | $2b$12$ZXnCZ5iNpm7R/nN6i1EOL.PXAPQwH29OJmeYLhHStI67RjivFyzQy | USER
+  3 | anna.nowak@example.com      | $2b$12$yJcFb.jCboHjaHiRgtrxJ.lKdjBzjMOKrSY0h6lqWVY4J2aqlMPs6 | USER
+  4 | jan.kowalski@example.com    | $2b$12$efbOhZ.Q0V01zBoBTAQA9u8wcQVNA2baIp7G4Js16VH3xktlKJOCu | USER
+(4 rows)
+\end{terminal}
+
+\zrzut{zad1-rejestracja.png}{Rejestracja \texttt{Jan.Kowalski@example.com} -- 201, email małymi literami, rola \texttt{USER}, brak hasha}
+
+\zrzut{zad1-rola-admin.png}{Rejestracja z polem \texttt{role: ADMIN} -- 400 (\texttt{Unrecognized key: role})}
+
+\zrzut{zad1-krotkie-haslo.png}{Zbyt krótkie hasło -- 400}
+
+\zrzut{zad1-duplikat.png}{\texttt{JAN.KOWALSKI@EXAMPLE.COM} -- ten sam email innymi literami, 409 \texttt{EMAIL\_TAKEN}}
+
+Równoległe rejestracje sprawdziłem skryptem \texttt{scripts/parallel-register.js}, który wysyła naraz 10 takich samych requestów. Jedno konto powstało, a pozostałe dostały 409 \texttt{EMAIL\_TAKEN}, bez żadnego 500:
+
+\begin{terminal}
+> node scripts/parallel-register.js
+request 1: 201
+request 2: 409 EMAIL_TAKEN
+request 3: 409 EMAIL_TAKEN
+request 4: 409 EMAIL_TAKEN
+request 5: 409 EMAIL_TAKEN
+request 6: 409 EMAIL_TAKEN
+request 7: 409 EMAIL_TAKEN
+request 8: 409 EMAIL_TAKEN
+request 9: 409 EMAIL_TAKEN
+request 10: 409 EMAIL_TAKEN
+201: 1, 409 EMAIL_TAKEN: 9, inne: 0
+konta z emailem piotr.rownolegly@example.com w bazie: 1
+\end{terminal}
+
+W logach PostgreSQL widać, że 7 z 9 konfliktów zatrzymał dopiero constraint UNIQUE, a 2 pozostałe trafiły już na zapisany wiersz i zatrzymało je sprawdzenie w service. W obu przypadkach klient dostaje ten sam 409 \texttt{EMAIL\_TAKEN}.
+
+\begin{terminal}
+> docker compose logs db | grep -A1 users_email_unique
+db-1  | 2026-10-31 23:17:17.343 UTC [853] ERROR:  duplicate key value violates unique constraint "users_email_unique"
+db-1  | 2026-10-31 23:17:17.343 UTC [853] DETAIL:  Key (email)=(piotr.rownolegly@example.com) already exists.
+db-1  | 2026-10-31 23:17:17.390 UTC [855] ERROR:  duplicate key value violates unique constraint "users_email_unique"
+db-1  | 2026-10-31 23:17:17.390 UTC [855] DETAIL:  Key (email)=(piotr.rownolegly@example.com) already exists.
+...
+
+> docker compose logs db | grep -c "Key (email)=(piotr.rownolegly@example.com) already exists"
+7
+\end{terminal}
+
+\section*{Zadanie 2 -- Logowanie i JWT}
+
+Logowanie porównuje hasło z hashem przez \texttt{bcrypt.compare} i przy złym emailu i złym haśle rzuca ten sam błąd, żeby nie dało się sprawdzić, które adresy mają konto. Token jest podpisany algorytmem HS256 i ma tylko \texttt{sub} (ID jako string), \texttt{role}, \texttt{iat} i \texttt{exp}, a czas życia pochodzi ze zmiennej \texttt{JWT\_EXPIRES\_IN} (domyślnie 15 minut).
+
+\zrzut{zad2-login.png}{Funkcja \texttt{login} w \texttt{auth.service.js} -- \texttt{bcrypt.compare} i \texttt{jwt.sign} z HS256}
+
+\zrzut{zad2-logowanie.png}{Logowanie -- \texttt{accessToken}, \texttt{tokenType: Bearer}, \texttt{expiresIn: 15m}}
+
+Zdekodowany token Jana (header i payload to zwykły base64url). W payloadzie nie ma emaila ani hasha, a różnica \texttt{exp} i \texttt{iat} to dokładnie 15 minut:
+
+\begin{terminal}
+> zdekodowany token Jana (base64url -> JSON)
+header:
+{
+  "alg": "HS256",
+  "typ": "JWT"
+}
+payload:
+{
+  "role": "USER",
+  "iat": 1793488562,
+  "exp": 1793489462,
+  "sub": "4"
+}
+iat = 2026-10-31T23:16:02.000Z, exp = 2026-10-31T23:31:02.000Z (15 min)
+\end{terminal}
+
+\zrzut{zad2-jwt-io.png}{Ten sam token zdekodowany w jwt.io}
+
+Porównanie odpowiedzi dla złego emaila i złego hasła -- ten sam status, kod i komunikat, różni się tylko \texttt{requestId}:
+
+\begin{terminal}
+### Zadanie 2 - zły email (401)
+POST http://localhost:3000/api/auth/login
+Content-Type: application/json
+
+{
+  "email": "nie.ma.takiego@example.com",
+  "password": "bardzo-dlugie-haslo"
+}
+
+=> 401
+{
+  "error": {
+    "code": "UNAUTHORIZED",
+    "message": "Invalid email or password",
+    "requestId": "93ac0f86-9a0f-4b0f-80e3-d0ecd82dbd0a"
+  }
+}
+
+### Zadanie 2 - złe hasło (401)
+POST http://localhost:3000/api/auth/login
+Content-Type: application/json
+
+{
+  "email": "jan.kowalski@example.com",
+  "password": "zle-haslo-12345"
+}
+
+=> 401
+{
+  "error": {
+    "code": "UNAUTHORIZED",
+    "message": "Invalid email or password",
+    "requestId": "9293eb84-b225-49b3-aec7-602bb5b33421"
+  }
+}
+\end{terminal}
+
+\zrzut{zad2-zly-email.png}{Zły email -- 401 \texttt{Invalid email or password}}
+
+\zrzut{zad2-zle-haslo.png}{Złe hasło -- identyczne 401 \texttt{Invalid email or password}}
+
+\zrzut{zad2-me.png}{\texttt{GET /api/auth/me} -- dane zalogowanego użytkownika bez hasha}
+
+\section*{Zadanie 3 -- Middleware authenticate i rezerwacje użytkownika}
+
+Middleware \texttt{authenticate} czyta nagłówek \texttt{Authorization: Bearer <token>}, weryfikuje token z jawnie podanym \texttt{algorithms: [\textquotedbl{}HS256\textquotedbl{}]} i ustawia \texttt{req.user = \{ id, role \}}. Wygasły token ma osobny komunikat \texttt{Token expired}, żeby frontend wiedział, że wystarczy się zalogować jeszcze raz.
+
+\zrzut{zad3-authenticate.png}{Middleware \texttt{authenticate.js}}
+
+\texttt{requireAuth} jest podpięty pod całe \texttt{/api/buildings}, \texttt{/api/rooms} i \texttt{/api/reservations} oraz pod \texttt{/api/auth/me}, więc nowy endpoint w tych modułach od razu jest chroniony. Publiczne zostały tylko \texttt{/api/auth/register}, \texttt{/api/auth/login} i \texttt{/api/docs}.
+
+\zrzut{zad3-app.png}{\texttt{app.js} -- Swagger UI, publiczne \texttt{/api/auth} i chronione moduły z \texttt{requireAuth}}
+
+Wszystkie przypadki 401 z pliku \texttt{requests.http} (dla każdego jest zrzut poniżej):
+
+\begin{center}
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{ll}
+\hline
+Przypadek & Komunikat (zawsze 401 \texttt{UNAUTHORIZED}) \\
+\hline
+brak nagłówka & \texttt{Authentication required} \\
+\texttt{Basic ...} zamiast \texttt{Bearer} & \texttt{Authorization header must be: Bearer <token>} \\
+\texttt{Bearer} bez tokenu & \texttt{Authorization header must be: Bearer <token>} \\
+zmieniony znak w podpisie & \texttt{Invalid token} \\
+zmieniony payload, oryginalny podpis & \texttt{Invalid token} \\
+token wygasły & \texttt{Token expired} \\
+\hline
+\end{tabular}%
+}
+\end{center}
+
+Token ze złym podpisem tworzy handler logowania Jakuba, który zmienia pierwszy znak podpisu. Zmieniony token ma podpis z prawdziwego tokenu Jakuba, ale payload z \texttt{role: ADMIN}, więc podpis przestaje pasować:
+
+\begin{terminal}
+> payload zmienionego tokenu (base64url -> JSON)
+{"role":"ADMIN","iat":1793520000,"exp":1793520900,"sub":"2"}
+\end{terminal}
+
+\zrzut{zad3-brak-naglowka.png}{Brak nagłówka \texttt{Authorization} -- 401}
+
+\zrzut{zad3-basic.png}{Nagłówek \texttt{Basic} zamiast \texttt{Bearer} -- 401}
+
+\zrzut{zad3-bearer-bez-tokenu.png}{\texttt{Bearer} bez tokenu -- 401}
+
+\zrzut{zad3-zly-podpis.png}{Token ze zmienionym znakiem w podpisie -- 401 \texttt{Invalid token}}
+
+\zrzut{zad3-zmieniony-payload.png}{Token z \texttt{role: ADMIN} i oryginalnym podpisem -- 401 \texttt{Invalid token}}
+
+Do testu wygasłego tokenu uruchomiłem serwer z \texttt{JWT\_EXPIRES\_IN=10s}. Zaraz po zalogowaniu token działa, a po 11 sekundach dostaje 401 \texttt{Token expired}:
+
+\begin{terminal}
+> JWT_EXPIRES_IN=10s node src/server.js
+Server running on http://localhost:3000 (PostgreSQL)
+
+> POST /api/auth/login
+< 200 {"tokenType":"Bearer","expiresIn":"10s"}
+> GET /api/auth/me
+< 200 {"id":2,"email":"jakub.sosnowski@example.com","role":"USER","createdAt":"2026-10-25T10:00:00.000Z"}
+... 11 s ...
+> GET /api/auth/me
+< 401 {"error":{"code":"UNAUTHORIZED","message":"Token expired"}}
+\end{terminal}
+
+\zrzut{zad3-wygasly.png}{Wygasły token z pliku \texttt{expired-token.http} -- 401 \texttt{Token expired}}
+
+Kolumnę \texttt{reserved\_by} zastępuje \texttt{user\_id} w nowej migracji, która działa też na bazie z danymi. Dla każdej nazwy z \texttt{reserved\_by} migracja szuka konta o emailu zrobionym z tej nazwy (np. \texttt{jakub.sosnowski@example.com}), a jeśli go nie ma, zakłada je z losowym hasłem. Potem uzupełnia \texttt{user\_id}, ustawia NOT NULL i usuwa starą kolumnę, a \texttt{down} przywraca \texttt{reserved\_by} z emailem użytkownika.
+
+\zrzut{zad3-migracja.png}{Migracja \texttt{20261108110000\_replace\_reserved\_by\_with\_user\_id.js}}
+
+Migrację uruchomiłem na bazie z danymi z zadania 03 (schemat i seed z poprzedniego zestawu). Każda rezerwacja trafiła do właściwego konta:
+
+\begin{terminal}
+roombooking=# SELECT id, room_id, reserved_by, status FROM reservations ORDER BY id;
+ id | room_id |   reserved_by   |  status
+----+---------+-----------------+-----------
+  1 |       1 | Jakub Sosnowski | CONFIRMED
+  2 |       1 | Anna Nowak      | CONFIRMED
+  3 |       2 | Jakub Sosnowski | CANCELLED
+  4 |       4 | Anna Nowak      | CONFIRMED
+  5 |       5 | Jakub Sosnowski | CONFIRMED
+(5 rows)
+
+> npx knex migrate:latest
+Batch 3 run: 2 migrations
+
+roombooking=# SELECT id, email, role FROM users ORDER BY id;
+ id |            email            | role
+----+-----------------------------+------
+  1 | jakub.sosnowski@example.com | USER
+  2 | anna.nowak@example.com      | USER
+(2 rows)
+
+roombooking=# SELECT r.id, r.room_id, r.user_id, u.email, r.status FROM reservations r JOIN users u ON u.id = r.user_id ORDER BY r.id;
+ id | room_id | user_id |            email            |  status
+----+---------+---------+-----------------------------+-----------
+  1 |       1 |       1 | jakub.sosnowski@example.com | CONFIRMED
+  2 |       1 |       2 | anna.nowak@example.com      | CONFIRMED
+  3 |       2 |       1 | jakub.sosnowski@example.com | CANCELLED
+  4 |       4 |       2 | anna.nowak@example.com      | CONFIRMED
+  5 |       5 |       1 | jakub.sosnowski@example.com | CONFIRMED
+(5 rows)
+\end{terminal}
+
+Funkcja \texttt{down} też działa. Po rollbacku \texttt{reserved\_by} wraca z emailami, a potem migracje i seed z zadania 04 przechodzą od nowa:
+
+\begin{terminal}
+> npx knex migrate:rollback
+Batch 3 rolled back: 2 migrations
+
+roombooking=# SELECT id, room_id, reserved_by, status FROM reservations ORDER BY id;
+ id | room_id |         reserved_by         |  status
+----+---------+-----------------------------+-----------
+  1 |       1 | jakub.sosnowski@example.com | CONFIRMED
+  2 |       1 | anna.nowak@example.com      | CONFIRMED
+  3 |       2 | jakub.sosnowski@example.com | CANCELLED
+  4 |       4 | anna.nowak@example.com      | CONFIRMED
+  5 |       5 | jakub.sosnowski@example.com | CONFIRMED
+(5 rows)
+
+> npx knex migrate:latest
+Batch 3 run: 2 migrations
+
+> npx knex seed:run
+Ran 2 seed files
+\end{terminal}
+
+\begin{terminal}[fontsize=\fontsize{7.5}{9}\selectfont]
+roombooking=# \d reservations
+                                        Table "public.reservations"
+    Column    |           Type           | Collation | Nullable |                 Default
+--------------+--------------------------+-----------+----------+------------------------------------------
+ id           | integer                  |           | not null | nextval('reservations_id_seq'::regclass)
+ room_id      | integer                  |           | not null |
+ participants | integer                  |           | not null |
+ start_time   | timestamp with time zone |           | not null |
+ end_time     | timestamp with time zone |           | not null |
+ status       | character varying(20)    |           | not null | 'CONFIRMED'::character varying
+ cancelled_at | timestamp with time zone |           |          |
+ created_at   | timestamp with time zone |           | not null | CURRENT_TIMESTAMP
+ user_id      | integer                  |           | not null |
+Indexes:
+    "reservations_pkey" PRIMARY KEY, btree (id)
+    "reservations_no_overlap" EXCLUDE USING gist (room_id WITH =, tstzrange(start_time, end_time, '[)'::text) WITH &&) WHERE (status::text = 'CONFIRMED'::text)
+    "reservations_room_id_start_time_end_time_index" btree (room_id, start_time, end_time)
+    "reservations_user_id_index" btree (user_id)
+Check constraints:
+    "reservations_participants_check" CHECK (participants > 0)
+    "reservations_status_check" CHECK (status::text = ANY (ARRAY['CONFIRMED'::character varying, 'CANCELLED'::character varying]::text[]))
+    "reservations_time_check" CHECK (end_time > start_time)
+Foreign-key constraints:
+    "reservations_room_id_foreign" FOREIGN KEY (room_id) REFERENCES rooms(id) ON DELETE RESTRICT
+    "reservations_user_id_foreign" FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE RESTRICT
+\end{terminal}
+
+\texttt{POST /api/reservations} bierze \texttt{userId} tylko z tokenu (\texttt{userId: currentUser.id} w service), a schemat body nie ma już \texttt{reservedBy}. Dzięki \texttt{.strict()} pole \texttt{userId} albo \texttt{reservedBy} w body daje 400, a odpowiedź zawiera \texttt{user: \{ id, email \}}.
+
+\zrzut{zad3-schemas.png}{\texttt{reservations.schemas.js} -- body bez \texttt{reservedBy} i filtr \texttt{userId} w query}
+
+\zrzut{zad3-rezerwacja.png}{Nowa rezerwacja Jakuba -- 201, w odpowiedzi \texttt{user: \{ id: 2, email \}}}
+
+\zrzut{zad3-userid-body.png}{\texttt{userId} w body -- 400}
+
+\zrzut{zad3-reservedby-body.png}{\texttt{reservedBy} w body -- 400}
+
+Skrypt \texttt{double-booking.js} z zadania 03 loguje się teraz jako Jakub i wysyła token w nagłówku. Zabezpieczenie przed podwójną rezerwacją dalej działa:
+
+\begin{terminal}
+> node scripts/double-booking.js
+request 1: 409
+request 2: 201
+request 3: 409
+request 4: 409
+request 5: 409
+request 6: 409
+request 7: 409
+request 8: 409
+request 9: 409
+request 10: 409
+201: 1, 409: 9, inne: 0
+CONFIRMED w bazie dla sali 3 (2026-11-20T10:00:00Z - 2026-11-20T12:00:00Z): 1
+\end{terminal}
+
+\section*{Zadanie 4 -- Authorization: role i ownership}
+
+Uprawnienia zależne tylko od roli sprawdza middleware \texttt{authorize(...roles)}. \texttt{POST}, \texttt{PATCH} i \texttt{DELETE} na budynkach i salach mają \texttt{authorize(\textquotedbl{}ADMIN\textquotedbl{})}, więc USER dostaje 403, a \texttt{GET} jest dla każdego zalogowanego.
+
+\zrzut{zad4-authorize.png}{Middleware \texttt{authorize.js}}
+
+\zrzut{zad4-routes.png}{\texttt{buildings.routes.js} -- \texttt{authorize(\textquotedbl{}ADMIN\textquotedbl{})} przed walidacją przy zmianach}
+
+Ownership wymaga danych z bazy, dlatego sprawdza go service, który dostaje \texttt{currentUser} jako zwykły parametr. Controller przekazuje do niego tylko \texttt{req.user}.
+
+\zrzut{zad4-ownership.png}{\texttt{reservations.service.js} -- \texttt{canAccess}, filtr dla USER i 404 dla cudzej rezerwacji}
+
+\zrzut{zad4-controller.png}{\texttt{reservations.controller.js} -- przekazanie \texttt{req.user} do service}
+
+Na liście USER zawsze dostaje filtr \texttt{userId = currentUser.id}, niezależnie od parametrów query, a paginacja i pozostałe filtry działają jak w zadaniu 03. Parametr \texttt{?userId=} od USER-a daje 403, a nie jest po cichu ignorowany. Jawny błąd od razu pokazuje, że klient używa parametru, do którego nie ma prawa, a przy ignorowaniu dostałby swoje rezerwacje i mógłby myśleć, że filtr zadziałał.
+
+Cudza rezerwacja w \texttt{GET /api/reservations/:id} i przy anulowaniu daje 404, tak samo jak nieistniejące ID. Rezerwacje są prywatne, więc nie zdradzamy, że rezerwacja o danym numerze w ogóle istnieje.
+
+Tabela uprawnień (Jakub jest właścicielem rezerwacji 1 i 7, Anna jest dla nich obcym użytkownikiem):
+
+\begin{center}
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{lcccc}
+\hline
+Endpoint & brak tokenu & USER właściciel & USER obcy & ADMIN \\
+\hline
+\texttt{GET /api/buildings} & 401 & 200 & 200 & 200 \\
+\texttt{POST /api/buildings} & 401 & 403 & 403 & 201 \\
+\texttt{PATCH /api/buildings/:id} & 401 & 403 & 403 & 200 \\
+\texttt{DELETE /api/buildings/:id} & 401 & 403 & 403 & 204 \\
+\texttt{GET /api/rooms/:id} & 401 & 200 & 200 & 200 \\
+\texttt{POST /api/rooms} & 401 & 403 & 403 & 201 \\
+\texttt{PATCH /api/rooms/:id} & 401 & 403 & 403 & 200 \\
+\texttt{DELETE /api/rooms/:id} & 401 & 403 & 403 & 204 \\
+\texttt{GET /api/reservations} & 401 & 200 (swoje) & 200 (swoje) & 200 (wszystkie) \\
+\texttt{GET /api/reservations?userId=3} & 401 & 403 & 403 & 200 \\
+\texttt{POST /api/reservations} & 401 & 201 & 201 & 201 \\
+\texttt{GET /api/reservations/:id} & 401 & 200 & 404 & 200 \\
+\texttt{PATCH /api/reservations/:id/cancel} & 401 & 200 & 404 & 200 \\
+\texttt{GET /api/auth/me} & 401 & 200 & 200 & 200 \\
+\hline
+\end{tabular}%
+}
+\end{center}
+
+Budynki, sale i \texttt{/api/auth/me} nie mają właściciela, więc w obu kolumnach USER jest zwykły użytkownik (Jakub). Przy \texttt{?userId=3} obie kolumny to 403, także dla Anny, której to jest ID.
+
+Każdy wiersz tabeli potwierdza log z uruchomienia sekcji \emph{Zadanie 4} pliku \texttt{requests.http} (status i kod błędu dla każdego requestu):
+
+\begin{terminal}
+#20 GET /api/buildings - brak tokenu (401) => 401 UNAUTHORIZED
+#21 GET /api/buildings - USER (200) => 200
+#22 GET /api/buildings - ADMIN (200) => 200
+#23 POST /api/buildings - brak tokenu (401) => 401 UNAUTHORIZED
+#24 POST /api/buildings - USER (403) => 403 FORBIDDEN
+#25 POST /api/buildings - ADMIN (201) => 201
+#26 PATCH /api/buildings/4 - brak tokenu (401) => 401 UNAUTHORIZED
+#27 PATCH /api/buildings/4 - USER (403) => 403 FORBIDDEN
+#28 PATCH /api/buildings/4 - ADMIN (200) => 200
+#29 DELETE /api/buildings/4 - brak tokenu (401) => 401 UNAUTHORIZED
+#30 DELETE /api/buildings/4 - USER (403) => 403 FORBIDDEN
+#31 DELETE /api/buildings/4 - ADMIN (204) => 204
+#32 GET /api/rooms/1 - brak tokenu (401) => 401 UNAUTHORIZED
+#33 GET /api/rooms/1 - USER (200) => 200
+#34 GET /api/rooms/1 - ADMIN (200) => 200
+#35 POST /api/rooms - brak tokenu (401) => 401 UNAUTHORIZED
+#36 POST /api/rooms - USER (403) => 403 FORBIDDEN
+#37 POST /api/rooms - ADMIN (201) => 201
+#38 PATCH /api/rooms/6 - brak tokenu (401) => 401 UNAUTHORIZED
+#39 PATCH /api/rooms/6 - USER (403) => 403 FORBIDDEN
+#40 PATCH /api/rooms/6 - ADMIN (200) => 200
+#41 DELETE /api/rooms/6 - brak tokenu (401) => 401 UNAUTHORIZED
+#42 DELETE /api/rooms/6 - USER (403) => 403 FORBIDDEN
+#43 DELETE /api/rooms/6 - ADMIN (204) => 204
+#44 GET /api/reservations - brak tokenu (401) => 401 UNAUTHORIZED
+#45 GET /api/reservations - USER Jakub widzi tylko swoje (200) => 200
+#46 GET /api/reservations - USER Anna widzi tylko swoje (200) => 200
+#47 GET /api/reservations - ADMIN widzi wszystkie (200) => 200
+#48 GET /api/reservations?userId=3 - brak tokenu (401) => 401 UNAUTHORIZED
+#49 GET /api/reservations?userId=3 - USER Jakub (403) => 403 FORBIDDEN
+#50 GET /api/reservations?userId=3 - USER Anna (403) => 403 FORBIDDEN
+#51 GET /api/reservations?userId=3 - ADMIN (200) => 200
+#52 POST /api/reservations - brak tokenu (401) => 401 UNAUTHORIZED
+#53 POST /api/reservations - USER Jakub (201) => 201
+#54 POST /api/reservations - USER Anna (201) => 201
+#55 POST /api/reservations - ADMIN (201) => 201
+#56 GET /api/reservations/1 - brak tokenu (401) => 401 UNAUTHORIZED
+#57 GET /api/reservations/1 - USER właściciel (200) => 200
+#58 GET /api/reservations/1 - USER obcy (404) => 404 NOT_FOUND
+#59 GET /api/reservations/1 - ADMIN (200) => 200
+#60 PATCH /api/reservations/7/cancel - brak tokenu (401) => 401 UNAUTHORIZED
+#61 PATCH /api/reservations/7/cancel - USER obcy (404) => 404 NOT_FOUND
+#62 PATCH /api/reservations/7/cancel - USER właściciel (200) => 200
+#63 PATCH /api/reservations/8/cancel - ADMIN anuluje rezerwację Anny (200) => 200
+#64 GET /api/auth/me - brak tokenu (401) => 401 UNAUTHORIZED
+#65 GET /api/auth/me - USER (200) => 200
+#66 GET /api/auth/me - ADMIN (200) => 200
+#67 ADMIN nie anuluje rozpoczętej rezerwacji (409) => 409 RESERVATION_ALREADY_STARTED
+#68 ADMIN nie zarezerwuje zajętej sali (409) => 409 ROOM_ALREADY_BOOKED
+#69 ADMIN nie przekroczy pojemności sali (409) => 409 ROOM_CAPACITY_EXCEEDED
+#70 ADMIN nie usunie budynku z salami (409) => 409 BUILDING_HAS_ROOMS
+#71 ADMIN nie usunie sali z rezerwacjami (409) => 409 ROOM_HAS_RESERVATIONS
+#72 USER z filtrami i paginacją nadal widzi tylko swoje (200) => 200
+#73 ADMIN z filtrem userId i statusem (200) => 200
+\end{terminal}
+
+\zrzut{zad4-wyniki-http.png}{Wynik uruchomienia całego \texttt{requests.http} w IntelliJ -- lista requestów ze statusami}
+
+\zrzut{zad4-user-403.png}{\texttt{POST /api/buildings} jako USER -- 403 \texttt{FORBIDDEN}}
+
+\zrzut{zad4-lista-jakub.png}{\texttt{GET /api/reservations} jako Jakub -- tylko jego rezerwacje}
+
+\zrzut{zad4-lista-admin.png}{\texttt{GET /api/reservations} jako ADMIN -- wszystkie rezerwacje}
+
+\zrzut{zad4-userid-403.png}{\texttt{?userId=3} jako USER -- 403}
+
+\zrzut{zad4-obcy-404.png}{Cudza rezerwacja (Anna pobiera rezerwację 1 Jakuba) -- 404}
+
+\zrzut{zad4-admin-409.png}{ADMIN anuluje rozpoczętą rezerwację -- 409 \texttt{RESERVATION\_ALREADY\_STARTED}}
+
+Reguły z poprzednich zestawów działają też dla ADMINa, a błędy 409 przy usuwaniu budynku z salami i sali z rezerwacjami wynikają z \texttt{ON DELETE RESTRICT} z zadania 03 (service sprawdza to wcześniej, żeby zwrócić czytelny kod).
+
+\section*{Zadanie 5 -- Konfiguracja, sekrety i dokumentacja API}
+
+\subsection*{Część A -- konfiguracja}
+
+Całą konfigurację czyta jeden moduł \texttt{src/config/index.js}: wczytuje \texttt{.env}, sprawdza zmienne schematem Zod i przy błędzie wypisuje listę problemów i kończy proces kodem 1. Z modułu korzysta też \texttt{knexfile.js}, a \texttt{process.env} nie pojawia się w żadnym innym pliku.
+
+\zrzut{zad5-config.png}{Moduł konfiguracji \texttt{src/config/index.js}}
+
+Plik \texttt{knexfile.js}:
+
+\begin{terminal}
+const config = require("./src/config");
+
+module.exports = {
+  client: "pg",
+  connection: config.DATABASE_URL,
+  migrations: { directory: "./src/db/migrations" },
+  seeds: { directory: "./src/db/seeds" }
+};
+\end{terminal}
+
+\begin{terminal}
+> grep -rn "process.env" --include=*.js . --exclude-dir=node_modules
+./src/config/index.js:19:const result = envSchema.safeParse(process.env);
+\end{terminal}
+
+Start aplikacji z błędną konfiguracją (za krótki \texttt{JWT\_SECRET}, \texttt{DATABASE\_URL} nie do PostgreSQL, zły format czasu i brak pliku \texttt{.env}):
+
+\begin{terminal}
+> JWT_SECRET=za-krotki-sekret DATABASE_URL=mysql://localhost/roombooking node src/server.js
+Invalid environment configuration:
+  DATABASE_URL: DATABASE_URL must be a postgres:// URL
+  JWT_SECRET: JWT_SECRET must have at least 32 characters
+(kod wyjscia: 1)
+
+> JWT_EXPIRES_IN="15 minut" node src/server.js
+Invalid environment configuration:
+  JWT_EXPIRES_IN: JWT_EXPIRES_IN must look like 10s, 15m, 1h or 7d
+(kod wyjscia: 1)
+
+> node src/server.js   (katalog bez pliku .env)
+Invalid environment configuration:
+  DATABASE_URL: DATABASE_URL is required
+  JWT_SECRET: JWT_SECRET is required
+(kod wyjscia: 1)
+\end{terminal}
+
+Plik \texttt{.env} jest w \texttt{.gitignore}, a w repozytorium jest tylko \texttt{.env.example} z przykładowymi wartościami. Prawdziwy \texttt{JWT\_SECRET} to 48 losowych bajtów z \texttt{crypto.randomBytes} i jest tylko w \texttt{.env}.
+
+Plik \texttt{.env.example}:
+
+\begin{terminal}
+NODE_ENV=development
+PORT=3000
+DATABASE_URL=postgres://user:change-me@localhost:5433/roombooking
+JWT_SECRET=replace-with-at-least-32-random-characters
+JWT_EXPIRES_IN=15m
+\end{terminal}
+
+Plik \texttt{.gitignore}:
+
+\begin{terminal}
+node_modules/
+.env
+.idea/
+*.pdf
+\end{terminal}
+
+Polecenie z treści zadania znajduje w całej historii git tylko placeholder z \texttt{.env.example}. Prawdziwy sekret nigdy nie trafił do repozytorium, więc nie trzeba było go zmieniać.
+
+\begin{terminal}
+> git log -p --all | grep -iE "JWT_SECRET=|password="
++JWT_SECRET=replace-with-at-least-32-random-characters
+\end{terminal}
+
+\subsection*{Część B -- dokumentacja}
+
+Dokumentacja OpenAPI jest w \texttt{src/docs/openapi.js} i opisuje wszystkie 18 operacji z parametrami, schematami body i wszystkimi kodami 2xx i 4xx. Schemat błędu \texttt{Error} jest zdefiniowany raz w \texttt{components/schemas}, a odpowiedzi błędów odwołują się do niego przez \texttt{\$ref} i mają własne przykłady. \texttt{securitySchemes} typu \texttt{bearer} jest ustawiony globalnie, a rejestracja i logowanie mają \texttt{security: []}.
+
+\zrzut{zad5-openapi.png}{\texttt{openapi.js} -- funkcja \texttt{error} z \texttt{\$ref} do \texttt{Error}, \texttt{securitySchemes} i schemat \texttt{Error}}
+
+\zrzut{zad5-swagger-lista.png}{Swagger UI pod \texttt{/api/docs} -- lista endpointów (kłódki przy chronionych)}
+
+\zrzut{zad5-swagger-authorize.png}{Okno \emph{Authorize} z tokenem Bearer}
+
+\zrzut{zad5-swagger-me.png}{Udane wywołanie chronionego \texttt{GET /api/auth/me} z Swagger UI po autoryzacji (200)}
+
+\zrzut{zad5-swagger-error.png}{Schemat \texttt{Error} w sekcji \emph{Schemas} Swagger UI}
+
+\end{document}
