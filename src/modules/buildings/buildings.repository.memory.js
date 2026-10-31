@@ -24,7 +24,18 @@ function createBuildingsRepository(store) {
     return building;
   }
 
-  return { findAll, findById, create };
+  async function update(id, { name, address }) {
+    const building = store.buildings.find(b => b.id === id);
+    if (name !== undefined) building.name = name;
+    if (address !== undefined) building.address = address;
+    return building;
+  }
+
+  async function remove(id) {
+    store.buildings = store.buildings.filter(b => b.id !== id);
+  }
+
+  return { findAll, findById, create, update, remove };
 }
 
 module.exports = { buildingsSeed, createBuildingsRepository };

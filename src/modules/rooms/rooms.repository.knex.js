@@ -36,11 +36,20 @@ function createRoomsRepository(db) {
     return findById(row.id);
   }
 
+  async function update(id, { name, capacity }) {
+    await db("rooms").where({ id }).update({ name, capacity });
+    return findById(id);
+  }
+
+  async function remove(id) {
+    await db("rooms").where({ id }).del();
+  }
+
   async function lockById(id) {
     await db("rooms").where({ id }).forUpdate().first();
   }
 
-  return { findAll, findById, findByBuildingId, create, lockById };
+  return { findAll, findById, findByBuildingId, create, update, remove, lockById };
 }
 
 module.exports = { createRoomsRepository };

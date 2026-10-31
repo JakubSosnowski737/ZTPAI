@@ -1,11 +1,13 @@
+const config = require("./config");
 const db = require("./db/knex");
 const { createApp } = require("./app");
 const { createKnexUnitOfWork } = require("./db/unit-of-work.knex");
 const { createMemoryUnitOfWork } = require("./db/unit-of-work.memory");
 
 const useMemory = process.argv.includes("--memory");
-const app = createApp(useMemory ? createMemoryUnitOfWork() : createKnexUnitOfWork(db));
+const { runInTransaction } = useMemory ? createMemoryUnitOfWork() : createKnexUnitOfWork(db);
+const app = createApp({ config, runInTransaction });
 
-app.listen(3000, () => {
-  console.log(`Server running on http://localhost:3000 (${useMemory ? "in-memory" : "PostgreSQL"})`);
+app.listen(config.PORT, () => {
+  console.log(`Server running on http://localhost:${config.PORT} (${useMemory ? "in-memory" : "PostgreSQL"})`);
 });

@@ -1,4 +1,4 @@
-const { NotFoundError, ConflictError, ValidationError } = require("../../errors/AppError");
+const { NotFoundError, ConflictError, ValidationError, ForbiddenError } = require("../../errors/AppError");
 
 const MIN_DURATION_MS = 15 * 60 * 1000;
 const MAX_DURATION_MS = 8 * 60 * 60 * 1000;
@@ -12,10 +12,22 @@ function overlaps(a, b) {
   return a.startTime.getTime() < b.endTime.getTime() && b.startTime.getTime() < a.endTime.getTime();
 }
 
+function canAccess(reservation, currentUser) {
+  return currentUser.role === "ADMIN" || reservation.userId === currentUser.id;
+}
+
 function createReservationsService({ runInTransaction, now = () => new Date() }) {
-  async function listReservations(query) {
+  async function listReservations(query, currentUser) {
+    const isAdmin = currentUser.role === "ADMIN";
+
+    if (!isAdmin && query.userId !== undefined) {
+      throw new ForbiddenError("Only ADMIN can filter reservations by userId");
+    }
+
+    const filters = isAdmin ? query : { ...query, userId: currentUser.id };
+
     return runInTransaction(async ({ reservations }) => {
-      const { items, total } = await reservations.list(query);
+      const { items, total } = await reservations.list(filters);
       return {
         items,
         meta: { page: query.page, limit: query.limit, total, totalPages: Math.ceil(total / query.limit) }
@@ -23,15 +35,15 @@ function createReservationsService({ runInTransaction, now = () => new Date() })
     });
   }
 
-  async function getReservation(id) {
+  async function getReservation(id, currentUser) {
     return runInTransaction(async ({ reservations }) => {
       const reservation = await reservations.findById(id);
-      if (!reservation) throw new NotFoundError("Reservation");
+      if (!reservation || !canAccess(reservation, currentUser)) throw new NotFoundError("Reservation");
       return reservation;
     });
   }
 
-  async function createReservation(input) {
+  async function createReservation(input, currentUser) {
     const startTime = new Date(input.startTime);
     const endTime = new Date(input.endTime);
     const duration = endTime.getTime() - startTime.getTime();
@@ -75,7 +87,7 @@ function createReservationsService({ runInTransaction, now = () => new Date() })
 
       return reservations.create({
         roomId: room.id,
-        reservedBy: input.reservedBy,
+        userId: currentUser.id,
         participants: input.participants,
         startTime,
         endTime,
@@ -87,10 +99,10 @@ function createReservationsService({ runInTransaction, now = () => new Date() })
     });
   }
 
-  async function cancelReservation(id) {
+  async function cancelReservation(id, currentUser) {
     return runInTransaction(async ({ reservations }) => {
       const reservation = await reservations.findById(id);
-      if (!reservation) throw new NotFoundError("Reservation");
+      if (!reservation || !canAccess(reservation, currentUser)) throw new NotFoundError("Reservation");
       const newStatus = "CANCELLED";
 
       if (reservation.status === newStatus) return reservation;

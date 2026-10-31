@@ -9,6 +9,7 @@ const reservationIdParams = z.object({
 const listReservationsQuery = z.object({
   roomId: z.coerce.number().int().positive().optional(),
   buildingId: z.coerce.number().int().positive().optional(),
+  userId: z.coerce.number().int().positive().optional(),
   status: z.enum(["CONFIRMED", "CANCELLED"]).optional(),
   from: z.iso.datetime({ offset: true }).optional(),
   to: z.iso.datetime({ offset: true }).optional(),
@@ -22,7 +23,6 @@ const listReservationsQuery = z.object({
 
 const createReservationBody = z.object({
   roomId: z.number().int().positive(),
-  reservedBy: z.string().trim().min(3).max(100),
   participants: z.number().int().positive(),
   startTime: z.iso.datetime({ offset: true }),
   endTime: z.iso.datetime({ offset: true })

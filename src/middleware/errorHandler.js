@@ -7,6 +7,10 @@ const DB_ERRORS = {
   "23P01": { status: 409, code: "ROOM_ALREADY_BOOKED", message: "Room is already booked for this time" }
 };
 
+const CONSTRAINT_ERRORS = {
+  users_email_unique: { status: 409, code: "EMAIL_TAKEN", message: "Email already registered" }
+};
+
 function errorHandler(err, req, res, next) {
   if (err instanceof AppError) {
     return res.status(err.statusCode).json({
@@ -25,7 +29,7 @@ function errorHandler(err, req, res, next) {
     });
   }
 
-  const dbError = DB_ERRORS[err.code];
+  const dbError = CONSTRAINT_ERRORS[err.constraint] ?? DB_ERRORS[err.code];
 
   if (dbError) {
     return res.status(dbError.status).json({
