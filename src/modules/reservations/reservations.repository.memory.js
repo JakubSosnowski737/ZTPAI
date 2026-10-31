@@ -4,7 +4,7 @@ const reservationsSeed = [
   {
     id: 1,
     roomId: 1,
-    reservedBy: "Jakub Sosnowski",
+    userId: 2,
     participants: 20,
     startTime: new Date("2026-11-10T10:00:00.000Z"),
     endTime: new Date("2026-11-10T12:00:00.000Z"),
@@ -15,7 +15,7 @@ const reservationsSeed = [
   {
     id: 2,
     roomId: 1,
-    reservedBy: "Anna Nowak",
+    userId: 3,
     participants: 25,
     startTime: new Date("2026-11-10T12:00:00.000Z"),
     endTime: new Date("2026-11-10T13:00:00.000Z"),
@@ -26,7 +26,7 @@ const reservationsSeed = [
   {
     id: 3,
     roomId: 2,
-    reservedBy: "Jakub Sosnowski",
+    userId: 2,
     participants: 15,
     startTime: new Date("2026-11-12T09:00:00.000Z"),
     endTime: new Date("2026-11-12T10:30:00.000Z"),
@@ -37,7 +37,7 @@ const reservationsSeed = [
   {
     id: 4,
     roomId: 4,
-    reservedBy: "Anna Nowak",
+    userId: 3,
     participants: 80,
     startTime: new Date("2026-10-20T08:00:00.000Z"),
     endTime: new Date("2026-10-20T10:00:00.000Z"),
@@ -48,7 +48,7 @@ const reservationsSeed = [
   {
     id: 5,
     roomId: 5,
-    reservedBy: "Jakub Sosnowski",
+    userId: 2,
     participants: 150,
     startTime: new Date("2026-11-15T14:00:00.000Z"),
     endTime: new Date("2026-11-15T16:00:00.000Z"),
@@ -64,16 +64,19 @@ function createReservationsRepository(store) {
   function withRoom(reservation) {
     const room = store.rooms.find(r => r.id === reservation.roomId);
     const building = store.buildings.find(b => b.id === room.buildingId);
+    const user = store.users.find(u => u.id === reservation.userId);
     return {
       ...reservation,
-      room: { id: room.id, name: room.name, building: { id: building.id, name: building.name } }
+      room: { id: room.id, name: room.name, building: { id: building.id, name: building.name } },
+      user: { id: user.id, email: user.email }
     };
   }
 
-  function matches(reservation, { roomId, buildingId, status, from, to }) {
+  function matches(reservation, { roomId, buildingId, userId, status, from, to }) {
     const room = store.rooms.find(r => r.id === reservation.roomId);
     return (roomId === undefined || reservation.roomId === roomId)
       && (buildingId === undefined || room.buildingId === buildingId)
+      && (userId === undefined || reservation.userId === userId)
       && (status === undefined || reservation.status === status)
       && (from === undefined || reservation.endTime.getTime() > new Date(from).getTime())
       && (to === undefined || reservation.startTime.getTime() < new Date(to).getTime());

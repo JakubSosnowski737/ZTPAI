@@ -1,4 +1,4 @@
-const { NotFoundError } = require("../../errors/AppError");
+const { NotFoundError, ConflictError } = require("../../errors/AppError");
 
 function createRoomsService({ runInTransaction }) {
   async function listRooms() {
@@ -21,7 +21,29 @@ function createRoomsService({ runInTransaction }) {
     });
   }
 
-  return { listRooms, getRoom, createRoom };
+  async function updateRoom(id, changes) {
+    return runInTransaction(async ({ rooms }) => {
+      const room = await rooms.findById(id);
+      if (!room) throw new NotFoundError("Room");
+      return rooms.update(id, changes);
+    });
+  }
+
+  async function deleteRoom(id) {
+    return runInTransaction(async ({ rooms, reservations }) => {
+      const room = await rooms.findById(id);
+      if (!room) throw new NotFoundError("Room");
+
+      const roomReservations = await reservations.findAll({ roomId: id });
+      if (roomReservations.length > 0) {
+        throw new ConflictError("Room still has reservations", "ROOM_HAS_RESERVATIONS");
+      }
+
+      await rooms.remove(id);
+    });
+  }
+
+  return { listRooms, getRoom, createRoom, updateRoom, deleteRoom };
 }
 
 module.exports = { createRoomsService };
