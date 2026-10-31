@@ -3,7 +3,8 @@ const { AppError } = require("../errors/AppError");
 const DB_ERRORS = {
   "23505": { status: 409, code: "ALREADY_EXISTS", message: "Resource already exists" },
   "23503": { status: 409, code: "RESOURCE_IN_USE", message: "Resource is referenced by other data" },
-  "23514": { status: 400, code: "CHECK_VIOLATION", message: "Data violates a database rule" }
+  "23514": { status: 400, code: "CHECK_VIOLATION", message: "Data violates a database rule" },
+  "23P01": { status: 409, code: "ROOM_ALREADY_BOOKED", message: "Room is already booked for this time" }
 };
 
 function errorHandler(err, req, res, next) {
