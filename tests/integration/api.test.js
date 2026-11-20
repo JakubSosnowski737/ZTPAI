@@ -4,12 +4,17 @@ const config = require("../../src/config");
 const db = require("../../src/db/knex");
 const { createApp } = require("../../src/app");
 const { createKnexUnitOfWork } = require("../../src/db/unit-of-work.knex");
+const { createEventBus } = require("../../src/events/eventBus");
+const { registerAuditListeners } = require("../../src/events/auditListeners");
 
 if (!config.DATABASE_URL.endsWith("_test")) {
   throw new Error("Integration tests must use a separate *_test database");
 }
 
-const app = createApp({ config, runInTransaction: createKnexUnitOfWork(db).runInTransaction });
+const { runInTransaction } = createKnexUnitOfWork(db);
+const eventBus = createEventBus();
+registerAuditListeners(eventBus, runInTransaction);
+const app = createApp({ config, runInTransaction, eventBus });
 
 const PASSWORD = "haslo-testowe-123";
 let adminHash;
@@ -44,13 +49,17 @@ beforeAll(async () => {
 });
 
 beforeEach(async () => {
-  await db.raw("TRUNCATE reservations, rooms, buildings, users RESTART IDENTITY CASCADE");
+  await db.raw("TRUNCATE audit_log, reservations, rooms, buildings, users RESTART IDENTITY CASCADE");
   await db("users").insert({ email: "admin@example.com", password_hash: adminHash, role: "ADMIN" });
   await db("buildings").insert({ name: "Budynek A", address: "ul. Warszawska 24, Kraków" });
   await db("rooms").insert([
     { building_id: 1, name: "101", capacity: 30 },
     { building_id: 1, name: "102", capacity: 20 }
   ]);
+});
+
+afterEach(async () => {
+  await eventBus.drain();
 });
 
 afterAll(async () => {
@@ -153,5 +162,40 @@ describe("Rooms API", () => {
 
     expect(res.status).toBe(403);
     expect(res.body.error.code).toBe("FORBIDDEN");
+  });
+});
+
+describe("Audit log API", () => {
+  test("zapisuje utworzenie i anulowanie, bez nieudanej kolizji i ponownego anulowania", async () => {
+    const jakub = await registerAndLogin("jakub.sosnowski@example.com");
+    const admin = await login("admin@example.com");
+    const { body: created } = await request(app).post("/api/reservations").set(bearer(jakub)).send(booking("15")).expect(201);
+    await request(app).post("/api/reservations").set(bearer(jakub)).send(booking("15")).expect(409);
+    await request(app).patch(`/api/reservations/${created.id}/cancel`).set(bearer(admin)).expect(200);
+    await request(app).patch(`/api/reservations/${created.id}/cancel`).set(bearer(admin)).expect(200);
+    await eventBus.drain();
+
+    const res = await request(app).get("/api/admin/audit-log").set(bearer(admin));
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.map(e => e.eventType)).toEqual(["reservation.cancelled", "reservation.created"]);
+    expect(res.body.data[0].payload).toEqual({ reservationId: created.id, roomId: 1, userId: 2, cancelledBy: 1 });
+    expect(res.body.meta.total).toBe(2);
+  });
+
+  test("filtr ?eventType= zwraca tylko wybrany typ, a USER dostaje 403", async () => {
+    const jakub = await registerAndLogin("jakub.sosnowski@example.com");
+    const admin = await login("admin@example.com");
+    const { body: created } = await request(app).post("/api/reservations").set(bearer(jakub)).send(booking("15")).expect(201);
+    await request(app).patch(`/api/reservations/${created.id}/cancel`).set(bearer(jakub)).expect(200);
+    await eventBus.drain();
+
+    const filtered = await request(app).get("/api/admin/audit-log?eventType=reservation.created").set(bearer(admin));
+    const forbidden = await request(app).get("/api/admin/audit-log").set(bearer(jakub));
+
+    expect(filtered.body.data.map(e => e.eventType)).toEqual(["reservation.created"]);
+    expect(filtered.body.meta.total).toBe(1);
+    expect(forbidden.status).toBe(403);
+    expect(forbidden.body.error.code).toBe("FORBIDDEN");
   });
 });

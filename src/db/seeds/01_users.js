@@ -7,7 +7,7 @@ const USERS = [
 ];
 
 exports.seed = async function (knex) {
-  await knex.raw("TRUNCATE reservations, rooms, buildings, users RESTART IDENTITY CASCADE");
+  await knex.raw("TRUNCATE audit_log, reservations, rooms, buildings, users RESTART IDENTITY CASCADE");
 
   const rows = await Promise.all(USERS.map(async user => ({
     email: user.email,

@@ -1,0 +1,73 @@
+### Logowanie - ADMIN (zapisuje adminToken)
+POST http://localhost:3000/api/auth/login
+Content-Type: application/json
+
+{
+  "email": "admin@example.com",
+  "password": "admin-password-123"
+}
+
+> {%
+  client.global.set("adminToken", response.body.accessToken);
+%}
+
+### Logowanie - Jakub Sosnowski, USER (zapisuje jakubToken)
+POST http://localhost:3000/api/auth/login
+Content-Type: application/json
+
+{
+  "email": "jakub.sosnowski@example.com",
+  "password": "jakub-password-123"
+}
+
+> {%
+  client.global.set("jakubToken", response.body.accessToken);
+%}
+
+### Scenariusz 1 - Jakub tworzy rezerwację (201, event reservation.created)
+POST http://localhost:3000/api/reservations
+Authorization: Bearer {{jakubToken}}
+Content-Type: application/json
+
+{
+  "roomId": 3,
+  "participants": 10,
+  "startTime": "2027-01-15T10:00:00Z",
+  "endTime": "2027-01-15T12:00:00Z"
+}
+
+> {%
+  client.global.set("reservationId", response.body.id);
+%}
+
+### Scenariusz 2 - nieudana próba kolizji (409, bez eventu)
+POST http://localhost:3000/api/reservations
+Authorization: Bearer {{jakubToken}}
+Content-Type: application/json
+
+{
+  "roomId": 3,
+  "participants": 10,
+  "startTime": "2027-01-15T11:00:00Z",
+  "endTime": "2027-01-15T13:00:00Z"
+}
+
+### Scenariusz 3 - ADMIN anuluje rezerwację Jakuba (200, event reservation.cancelled i powiadomienie)
+PATCH http://localhost:3000/api/reservations/{{reservationId}}/cancel
+Authorization: Bearer {{adminToken}}
+
+### Scenariusz 4 - ponowne anulowanie (200, idempotentne, bez eventu)
+PATCH http://localhost:3000/api/reservations/{{reservationId}}/cancel
+Authorization: Bearer {{adminToken}}
+
+### Audit log - ADMIN, od najnowszych (200)
+GET http://localhost:3000/api/admin/audit-log
+Authorization: Bearer {{adminToken}}
+
+### Audit log - tylko reservation.created (200)
+GET http://localhost:3000/api/admin/audit-log?eventType=reservation.created&page=1&limit=10
+Authorization: Bearer {{adminToken}}
+
+### Audit log - USER (403)
+GET http://localhost:3000/api/admin/audit-log
+Authorization: Bearer {{jakubToken}}

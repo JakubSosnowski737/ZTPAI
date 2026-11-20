@@ -26,14 +26,15 @@ module.exports = {
   openapi: "3.0.3",
   info: {
     title: "Room Booking API",
-    version: "4.0.0",
-    description: "Room Booking API z zadania 04 - Jakub Sosnowski"
+    version: "5.0.0",
+    description: "Room Booking API z zadania 05 - Jakub Sosnowski"
   },
   tags: [
     { name: "Auth" },
     { name: "Buildings" },
     { name: "Rooms" },
-    { name: "Reservations" }
+    { name: "Reservations" },
+    { name: "Admin" }
   ],
   security: [{ bearerAuth: [] }],
   paths: {
@@ -277,6 +278,26 @@ module.exports = {
           409: error("Reservation has already started", "RESERVATION_ALREADY_STARTED", "Reservation has already started")
         }
       }
+    },
+    "/api/admin/audit-log": {
+      get: {
+        tags: ["Admin"],
+        summary: "Audit log of reservation events, newest first (ADMIN)",
+        parameters: [
+          queryParam("eventType", "Only events of this type", {
+            type: "string",
+            enum: ["reservation.created", "reservation.cancelled"]
+          }),
+          queryParam("page", "Page number", { type: "integer", minimum: 1, default: 1 }),
+          queryParam("limit", "Page size", { type: "integer", minimum: 1, maximum: 100, default: 20 })
+        ],
+        responses: {
+          200: ok("Page of audit log entries", ref("AuditLogList")),
+          400: E400,
+          401: E401,
+          403: E403
+        }
+      }
     }
   },
   components: {
@@ -455,6 +476,34 @@ module.exports = {
               page: { type: "integer", example: 1 },
               limit: { type: "integer", example: 20 },
               total: { type: "integer", example: 3 },
+              totalPages: { type: "integer", example: 1 }
+            }
+          }
+        }
+      },
+      AuditLogEntry: {
+        type: "object",
+        properties: {
+          id: { type: "integer", example: 2 },
+          eventType: { type: "string", enum: ["reservation.created", "reservation.cancelled"] },
+          payload: {
+            type: "object",
+            additionalProperties: true,
+            example: { reservationId: 6, roomId: 3, userId: 2, cancelledBy: 1 }
+          },
+          createdAt: { type: "string", format: "date-time" }
+        }
+      },
+      AuditLogList: {
+        type: "object",
+        properties: {
+          data: { type: "array", items: ref("AuditLogEntry") },
+          meta: {
+            type: "object",
+            properties: {
+              page: { type: "integer", example: 1 },
+              limit: { type: "integer", example: 20 },
+              total: { type: "integer", example: 2 },
               totalPages: { type: "integer", example: 1 }
             }
           }
