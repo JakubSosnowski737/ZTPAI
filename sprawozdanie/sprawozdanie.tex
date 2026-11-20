@@ -40,7 +40,7 @@
 API z zadania 04 ma teraz testy automatyczne: 25 unit testów na repositories in-memory i 10 testów integracyjnych przez Supertest na osobnej bazie. Całość uruchamia się jedną komendą przez Docker Compose, a service rezerwacji publikuje eventy, które trafiają do audit logu. Przy każdym pushu na \texttt{main} i przy każdym pull requeście GitHub Actions uruchamia testy i buduje obraz Dockera.
 
 Repozytorium: \url{https://github.com/JakubSosnowski737/ZTPAI}\\
-Oceniany commit: \texttt{UZUPELNIJ}
+Oceniany commit: \texttt{3c8e018} (merge pull requesta z demonstracją CI)
 
 {\small
 \begin{verbatim}
@@ -748,19 +748,23 @@ Historia commitów pokazuje rozwój projektu od zadania 02 do 05:
 
 \begin{terminal}
 > git log --oneline
-80444a9 README: badge CI i adres repozytorium
-df9c690 Sprawozdanie z zadania 05, instrukcja zrzutow i konfiguracje uruchomieniowe IntelliJ
-2ea4bb5 CI w GitHub Actions: testy z PostgreSQL i budowanie obrazu Docker
-cc09420 Eventy i audit log: event bus, listenery, GET /api/admin/audit-log
-3ada749 Docker Compose: Dockerfile, healthcheck bazy, graceful shutdown i README
-6217f94 Testy integracyjne API (Supertest, osobna baza testowa)
-8c2eb94 Unit testy service rezerwacji (Jest, repositories in-memory, wstrzykniety czas)
-497dc4a Sprawozdanie z zadania 04
-5f25b6b Uzytkownicy, logowanie JWT, role i ownership, konfiguracja z Zod i Swagger UI
-fe332aa Sprawozdanie, proby lamania constraintow w psql i request z wszystkimi parametrami
-bd5b08b Blokada FOR UPDATE, exclusion constraint i skrypt double-booking
-bfe030f PostgreSQL w Dockerze, migracje i seed Knex, budynki, JOIN i paginacja
-a03b0df Room Booking API z zadania 02 jako punkt wyjscia
+3c8e018 Merge pull request #1 from JakubSosnowski737/ci-demo
+0d6b875 CI demo: poprawka overlaps (przywrocone <)
+d60b361 CI demo: celowy blad w overlaps (<= zamiast <)
+e08f89f Sprawozdanie: link do repozytorium i dokladne linie do zrzutow
+f3b5422 README: badge CI i adres repozytorium
+483678d Sprawozdanie z zadania 05, instrukcja zrzutow i konfiguracje uruchomieniowe IntelliJ
+e589460 CI w GitHub Actions: testy z PostgreSQL i budowanie obrazu Docker
+bc7b2b4 Eventy i audit log: event bus, listenery, GET /api/admin/audit-log
+e9a6e45 Docker Compose: Dockerfile, healthcheck bazy, graceful shutdown i README
+0cadec2 Testy integracyjne API (Supertest, osobna baza testowa)
+8ff6f7e Unit testy service rezerwacji (Jest, repositories in-memory, wstrzykniety czas)
+cb2632e Sprawozdanie z zadania 04
+6dceb07 Uzytkownicy, logowanie JWT, role i ownership, konfiguracja z Zod i Swagger UI
+6e5c9cb Sprawozdanie, proby lamania constraintow w psql i request z wszystkimi parametrami
+f8abfba Blokada FOR UPDATE, exclusion constraint i skrypt double-booking
+e2acdc6 PostgreSQL w Dockerze, migracje i seed Knex, budynki, JOIN i paginacja
+2fad82d Room Booking API z zadania 02 jako punkt wyjscia
 \end{terminal}
 
 \zrzut{zad5-readme-badge.png}{README z badge statusu CI na GitHubie}
