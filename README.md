@@ -1,14 +1,16 @@
 # Room Booking API
 
+![CI](https://github.com/JakubSosnowski737/ZTPAI/actions/workflows/ci.yml/badge.svg)
+
 API do rezerwacji sal w budynkach: Express 5, Zod, PostgreSQL 16, Knex, JWT, Swagger UI.
-Projekt z laboratoriów ZPAI (Jakub Sosnowski 151935).
+Zadanie z laboratoriów ZPAI (Jakub Sosnowski 151935).
 
 ## Uruchomienie od zera (Docker)
 
 Wymagany jest tylko Docker z Docker Compose.
 
 ```bash
-git clone <adres-repozytorium> room-booking-api
+git clone https://github.com/JakubSosnowski737/ZTPAI.git room-booking-api
 cd room-booking-api
 cp .env.example .env
 docker compose up --build
