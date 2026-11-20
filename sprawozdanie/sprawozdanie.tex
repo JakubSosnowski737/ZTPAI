@@ -1,0 +1,770 @@
+\documentclass[12pt,a4paper]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[polish]{babel}
+\usepackage{lmodern}
+\usepackage[margin=2.5cm]{geometry}
+\usepackage{graphicx}
+\usepackage{float}
+\usepackage{fvextra}
+\usepackage[hidelinks]{hyperref}
+
+\setlength{\emergencystretch}{3em}
+
+\DeclareUnicodeCharacter{221A}{\ensuremath{\surd}}
+\DeclareUnicodeCharacter{25CF}{\textbullet}
+
+\DefineVerbatimEnvironment{terminal}{Verbatim}{breaklines,fontsize=\footnotesize,frame=single,framesep=2mm}
+
+\newcommand{\zrzut}[2]{%
+  \begin{figure}[H]
+    \centering
+    \IfFileExists{#1}{\def\plik{#1}}{\def\plik{img/#1}}%
+    \IfFileExists{\plik}
+      {\includegraphics[width=0.9\textwidth,height=0.6\textheight,keepaspectratio]{\plik}}
+      {\fbox{\parbox[c][3cm][c]{0.85\textwidth}{\centering Miejsce na zrzut ekranu\\[4pt]\texttt{#1}}}}
+    \caption{#2}
+  \end{figure}%
+}
+
+\title{Sprawozdanie z laboratorium nr 5\\[6pt]\large ZPAI -- Zadanie 05: Room Booking API -- testy, Docker Compose, eventy i CI}
+\author{Jakub Sosnowski 151935}
+\date{\today}
+
+\begin{document}
+
+\maketitle
+
+\section*{Opis rozwiązania}
+
+API z zadania 04 ma teraz testy automatyczne: 25 unit testów na repositories in-memory i 10 testów integracyjnych przez Supertest na osobnej bazie. Całość uruchamia się jedną komendą przez Docker Compose, a service rezerwacji publikuje eventy, które trafiają do audit logu. Przy każdym pushu na \texttt{main} i przy każdym pull requeście GitHub Actions uruchamia testy i buduje obraz Dockera.
+
+Repozytorium: \url{https://github.com/UZUPELNIJ/room-booking-api}\\
+Oceniany commit: \texttt{UZUPELNIJ}
+
+{\small
+\begin{verbatim}
+LAB05/
++-- .github/workflows/ci.yml
++-- .dockerignore
++-- Dockerfile
++-- docker-compose.yml               (api + db, healthcheck, wolumen pgdata)
++-- docker/initdb/01-create-test-db.sql
++-- jest.config.js
++-- README.md
++-- audit-log.http                   (scenariusz z zadania 4)
++-- tests/
+|   +-- setupEnv.js
+|   +-- unit/
+|   |   +-- reservations.service.test.js
+|   |   +-- eventBus.test.js
+|   +-- integration/
+|       +-- api.test.js
++-- src/
+    +-- server.js                    (event bus, listenery, graceful shutdown)
+    +-- events/
+    |   +-- eventBus.js
+    |   +-- eventTypes.js
+    |   +-- auditListeners.js
+    |   +-- notificationListeners.js
+    +-- db/migrations/20261115100000_create_audit_log.js
+    +-- modules/audit/               (routes, controller, service, schemas,
+                                      mapper, repository knex i in-memory)
+\end{verbatim}
+}
+
+Uruchomienie:
+
+\begin{terminal}
+cp .env.example .env
+docker compose up --build                     (API: localhost:3000, Swagger: localhost:3000/api/docs)
+docker compose exec api npx knex seed:run     (konta, budynki, sale i rezerwacje)
+npm ci
+npm test                                      (unit + integracyjne, baza z docker compose up -d db)
+\end{terminal}
+
+\section*{Zadanie 1 -- Unit testy logiki biznesowej}
+
+Unit testy service'u rezerwacji używają repositories in-memory i stałego czasu \texttt{now: () => NOW} (1 listopada 2026, 12:00 UTC), więc nie potrzebują bazy ani prawdziwego zegara. Funkcja \texttt{setup()} za każdym razem buduje nowy stan przez \texttt{createMemoryUnitOfWork(\{ reservations \})}, dzięki czemu testy przechodzą w dowolnej kolejności, a asercje sprawdzają \texttt{code} błędu, a nie treść komunikatu.
+
+\zrzut{zad1-setup.png}{Pomocnicze funkcje testów: stały czas \texttt{NOW}, \texttt{reservation()}, \texttt{booking()} i \texttt{setup()} z repositories in-memory}
+
+\zrzut{zad1-test-each.png}{\texttt{test.each} dla nakładania się i dla przedziałów stykających się}
+
+\zrzut{zad1-uow-memory.png}{\texttt{createMemoryUnitOfWork(initial)} -- repositories in-memory z własnym stanem dla każdego testu}
+
+Obowiązkowe przypadki i testy, które je sprawdzają:
+
+{\small
+\begin{center}
+\begin{tabular}{p{3.6cm}p{11.2cm}}
+\hline
+Reguła & Testy \\
+\hline
+Nakładanie się & odrzucone (\texttt{ROOM\_ALREADY\_BOOKED}): częściowo na początku, częściowo na końcu, zawiera istniejącą, zawiera się w istniejącej; dozwolone: oba przedziały stykające się i ten sam czas w innej sali \\
+Anulowane rezerwacje & rezerwacja \texttt{CANCELLED} nie blokuje przedziału \\
+Pojemność & \texttt{participants == capacity} dozwolone, \texttt{capacity + 1} odrzucone (\texttt{ROOM\_CAPACITY\_EXCEEDED}) \\
+Czas trwania & 15 min i 8 h dozwolone, 14 min i 8 h 1 min odrzucone (\texttt{VALIDATION\_ERROR}) \\
+Anulowanie & rozpoczęta rezerwacja odrzucona (\texttt{RESERVATION\_ALREADY\_STARTED}), podwójne anulowanie idempotentne -- \texttt{cancelledAt} bez zmian, choć zegar poszedł do przodu \\
+Ownership & obcy USER odrzucony (\texttt{NOT\_FOUND}, bo w zadaniu 04 cudze rezerwacje dają 404), ADMIN może anulować; USER widzi tylko swoje i nie może filtrować po \texttt{userId} \\
+Eventy (zadanie 4) & publish po sukcesie, brak eventu po błędzie i przy ponownym anulowaniu \\
+\hline
+\end{tabular}
+\end{center}
+}
+
+Unit testy nie łączą się z bazą. Przy zatrzymanych kontenerach \texttt{npm run test:unit} daje 25 zaliczonych testów:
+
+\begin{terminal}
+> docker compose stop
+ Container lab05-api-1 Stopping
+ Container lab05-api-1 Stopped
+ Container lab05-db-1 Stopping
+ Container lab05-db-1 Stopped
+
+> docker compose ps
+NAME      STATUS
+
+> npm run test:unit
+
+> room-booking-api@5.0.0 test:unit
+> jest tests/unit
+
+PASS tests/unit/eventBus.test.js
+  eventBus
+    √ błąd listenera nie trafia do kodu, który opublikował event (4 ms)
+    √ listener uruchamia się dopiero po powrocie z publish (1 ms)
+
+PASS tests/unit/reservations.service.test.js
+  createReservation - nakładanie się rezerwacji
+    √ odrzuca rezerwację, która nakłada się częściowo na początku (1 ms)
+    √ odrzuca rezerwację, która nakłada się częściowo na końcu (1 ms)
+    √ odrzuca rezerwację, która nakłada się i zawiera całą istniejącą
+    √ odrzuca rezerwację, która nakłada się i zawiera się w istniejącej (1 ms)
+    √ pozwala na rezerwację, która kończy się, gdy istniejąca się zaczyna
+    √ pozwala na rezerwację, która zaczyna się, gdy istniejąca się kończy (1 ms)
+    √ pozwala na ten sam przedział w innej sali
+    √ anulowana rezerwacja nie blokuje przedziału (1 ms)
+  createReservation - pojemność sali
+    √ pozwala, gdy liczba uczestników jest równa pojemności sali
+    √ odrzuca, gdy uczestników jest o jednego więcej niż miejsc
+  createReservation - czas trwania
+    √ pozwala na rezerwację trwającą dokładnie 15 minut (1 ms)
+    √ pozwala na rezerwację trwającą dokładnie 8 godzin
+    √ odrzuca rezerwację trwającą 14 minut
+    √ odrzuca rezerwację trwającą 8 godzin i 1 minutę (1 ms)
+  cancelReservation
+    √ odrzuca anulowanie rezerwacji, która już się rozpoczęła
+    √ podwójne anulowanie jest idempotentne i nie zmienia cancelledAt (1 ms)
+  ownership
+    √ obcy USER nie może pobrać ani anulować cudzej rezerwacji (1 ms)
+    √ ADMIN może anulować cudzą rezerwację (1 ms)
+    √ USER widzi na liście tylko swoje rezerwacje
+    √ USER nie może filtrować listy po userId
+  eventy
+    √ publikuje reservation.created po udanym utworzeniu rezerwacji
+    √ nie publikuje eventu, gdy utworzenie kończy się błędem
+    √ publikuje reservation.cancelled tylko przy pierwszym anulowaniu (1 ms)
+
+Test Suites: 2 passed, 2 total
+Tests:       25 passed, 25 total
+Snapshots:   0 total
+Time:        0.376 s, estimated 1 s
+\end{terminal}
+
+\subsection*{Kontrola jakości testów}
+
+Celowo zamieniłem \texttt{<} na \texttt{<=} w funkcji \texttt{overlaps}. Błąd wykryły oba testy przedziałów stykających się, bo rezerwacje 08:00--10:00 i 12:00--13:00 obok istniejącej 10:00--12:00 zaczęły być traktowane jako kolizja:
+
+\begin{terminal}
+> git diff src/modules/reservations/reservations.service.js
+diff --git a/src/modules/reservations/reservations.service.js b/src/modules/reservations/reservations.service.js
+index d2561eb..5a45d32 100644
+--- a/src/modules/reservations/reservations.service.js
++++ b/src/modules/reservations/reservations.service.js
+@@ -11,7 +11,7 @@ const ALLOWED_TRANSITIONS = {
+ };
+
+ function overlaps(a, b) {
+-  return a.startTime.getTime() < b.endTime.getTime() && b.startTime.getTime() < a.endTime.getTime();
++  return a.startTime.getTime() <= b.endTime.getTime() && b.startTime.getTime() <= a.endTime.getTime();
+ }
+
+ function canAccess(reservation, currentUser) {
+
+> npm run test:unit
+PASS tests/unit/eventBus.test.js
+FAIL tests/unit/reservations.service.test.js
+    × pozwala na rezerwację, która kończy się, gdy istniejąca się zaczyna (1 ms)
+    × pozwala na rezerwację, która zaczyna się, gdy istniejąca się kończy
+  ● createReservation - nakładanie się rezerwacji › pozwala na rezerwację, która kończy się, gdy istniejąca się zaczyna
+    Received promise rejected instead of resolved
+    Rejected to value: [ConflictError: Room is already booked for this time]
+  ● createReservation - nakładanie się rezerwacji › pozwala na rezerwację, która zaczyna się, gdy istniejąca się kończy
+    Received promise rejected instead of resolved
+    Rejected to value: [ConflictError: Room is already booked for this time]
+Test Suites: 1 failed, 1 passed, 2 total
+Tests:       2 failed, 23 passed, 25 total
+\end{terminal}
+
+Po przywróceniu poprawnego kodu wszystkie testy znowu przechodzą:
+
+\begin{terminal}
+> git checkout -- src/modules/reservations/reservations.service.js
+
+> npm run test:unit
+
+Test Suites: 2 passed, 2 total
+Tests:       25 passed, 25 total
+Snapshots:   0 total
+Time:        0.348 s, estimated 1 s
+\end{terminal}
+
+\section*{Zadanie 2 -- Testy integracyjne API}
+
+Testy integracyjne wysyłają requesty przez Supertest prosto do \texttt{createApp()}, bez uruchamiania serwera na porcie. Działają na osobnej bazie \texttt{roombooking\_test}, a plik testu przerywa się od razu, jeśli nazwa bazy nie kończy się na \texttt{\_test}, żeby nigdy nie wyczyścić bazy deweloperskiej.
+
+Plik \texttt{jest.config.js}:
+
+\begin{terminal}
+module.exports = {
+  testEnvironment: "node",
+  setupFiles: ["<rootDir>/tests/setupEnv.js"],
+  testTimeout: 15000,
+  verbose: true,
+  silent: true
+};
+\end{terminal}
+
+Plik \texttt{tests/setupEnv.js} ustawia zmienne, zanim cokolwiek wczyta moduł konfiguracji. Jest daje testom własną kopię \texttt{process.env}, więc \texttt{process.loadEnvFile()} nic by tu nie dało -- dlatego \texttt{TEST\_DATABASE\_URL} czytam z \texttt{.env} przez \texttt{util.parseEnv}, a w CI przychodzi ze zmiennej środowiskowej workflow.
+
+\begin{terminal}
+const fs = require("node:fs");
+const path = require("node:path");
+const { parseEnv } = require("node:util");
+
+const envFile = path.join(__dirname, "..", ".env");
+const fileEnv = fs.existsSync(envFile) ? parseEnv(fs.readFileSync(envFile, "utf8")) : {};
+
+process.env.NODE_ENV = "test";
+process.env.DATABASE_URL = process.env.TEST_DATABASE_URL
+  ?? fileEnv.TEST_DATABASE_URL
+  ?? "postgres://roombooking:change-me@localhost:5434/roombooking_test";
+process.env.JWT_SECRET = "test-secret-test-secret-test-secret-123";
+process.env.JWT_EXPIRES_IN = "15m";
+\end{terminal}
+
+Bazę testową tworzy skrypt \texttt{docker/initdb/01-create-test-db.sql} przy pierwszym starcie kontenera \texttt{db}. Schemat powstaje migracjami w \texttt{beforeAll}, przed każdym testem \texttt{TRUNCATE} czyści tabele i wstawia ADMINa, budynek i dwie sale, po każdym teście czekam na listenery eventów, a \texttt{afterAll} zamyka pulę połączeń, więc Jest nie zgłasza open handles.
+
+\zrzut{zad2-hooks.png}{Przygotowanie testów integracyjnych: \texttt{createApp()}, zabezpieczenie bazy \texttt{\_test} i hooki \texttt{beforeAll}, \texttt{beforeEach}, \texttt{afterEach}, \texttt{afterAll}}
+
+\zrzut{zad2-test-post.png}{Test \texttt{POST /api/reservations} -- 201, nagłówek \texttt{Location} i sprawdzenie rekordu w bazie}
+
+\zrzut{zad2-testy.png}{Testy 400 z \texttt{details}, 409 \texttt{ROOM\_ALREADY\_BOOKED}, 404 dla cudzej rezerwacji i pagination}
+
+\texttt{npm run test:integration} działa od zera -- najpierw usunąłem i założyłem na nowo pustą bazę testową:
+
+\begin{terminal}
+> docker compose exec db psql -U roombooking -d roombooking -c "DROP DATABASE roombooking_test;" -c "CREATE DATABASE roombooking_test;"
+DROP DATABASE
+CREATE DATABASE
+
+> docker compose exec db psql -U roombooking -d roombooking_test -c "\dt"
+Did not find any relations.
+
+> npm run test:integration
+
+> room-booking-api@5.0.0 test:integration
+> jest --runInBand tests/integration
+
+PASS tests/integration/api.test.js (7.555 s)
+  Auth API
+    √ rejestracja, logowanie i GET /api/auth/me (567 ms)
+    √ 401 bez tokenu (99 ms)
+  Reservations API
+    √ POST /api/reservations zwraca 201, nagłówek Location i zapisuje rekord w bazie (571 ms)
+    √ 400 z details dla błędnego body (547 ms)
+    √ 409 ROOM_ALREADY_BOOKED dla nakładającej się rezerwacji (1051 ms)
+    √ 404 dla USER pobierającego cudzą rezerwację (1040 ms)
+    √ pagination: meta.total i liczba elementów w data (622 ms)
+  Rooms API
+    √ 403 dla USER próbującego utworzyć salę (563 ms)
+  Audit log API
+    √ zapisuje utworzenie i anulowanie, bez nieudanej kolizji i ponownego anulowania (662 ms)
+    √ filtr ?eventType= zwraca tylko wybrany typ, a USER dostaje 403 (656 ms)
+
+Test Suites: 1 passed, 1 total
+Tests:       10 passed, 10 total
+Snapshots:   0 total
+Time:        7.711 s
+\end{terminal}
+
+\texttt{npm test} uruchamia oba rodzaje testów razem i kończy się sukcesem (35 testów, bez ostrzeżeń o open handles):
+
+\begin{terminal}
+> npm test
+
+> room-booking-api@5.0.0 test
+> jest --runInBand
+
+PASS tests/integration/api.test.js (7.185 s)
+  Auth API
+    √ rejestracja, logowanie i GET /api/auth/me (595 ms)
+    √ 401 bez tokenu (104 ms)
+  Reservations API
+    √ POST /api/reservations zwraca 201, nagłówek Location i zapisuje rekord w bazie (570 ms)
+    √ 400 z details dla błędnego body (572 ms)
+    √ 409 ROOM_ALREADY_BOOKED dla nakładającej się rezerwacji (1029 ms)
+    √ 404 dla USER pobierającego cudzą rezerwację (1029 ms)
+    √ pagination: meta.total i liczba elementów w data (600 ms)
+  Rooms API
+    √ 403 dla USER próbującego utworzyć salę (572 ms)
+  Audit log API
+    √ zapisuje utworzenie i anulowanie, bez nieudanej kolizji i ponownego anulowania (666 ms)
+    √ filtr ?eventType= zwraca tylko wybrany typ, a USER dostaje 403 (665 ms)
+
+PASS tests/unit/reservations.service.test.js
+  createReservation - nakładanie się rezerwacji
+    √ odrzuca rezerwację, która nakłada się częściowo na początku (2 ms)
+    √ odrzuca rezerwację, która nakłada się częściowo na końcu
+    √ odrzuca rezerwację, która nakłada się i zawiera całą istniejącą (1 ms)
+    √ odrzuca rezerwację, która nakłada się i zawiera się w istniejącej
+    √ pozwala na rezerwację, która kończy się, gdy istniejąca się zaczyna (1 ms)
+    √ pozwala na rezerwację, która zaczyna się, gdy istniejąca się kończy
+    √ pozwala na ten sam przedział w innej sali (1 ms)
+    √ anulowana rezerwacja nie blokuje przedziału
+  createReservation - pojemność sali
+    √ pozwala, gdy liczba uczestników jest równa pojemności sali
+    √ odrzuca, gdy uczestników jest o jednego więcej niż miejsc (1 ms)
+  createReservation - czas trwania
+    √ pozwala na rezerwację trwającą dokładnie 15 minut
+    √ pozwala na rezerwację trwającą dokładnie 8 godzin
+    √ odrzuca rezerwację trwającą 14 minut (1 ms)
+    √ odrzuca rezerwację trwającą 8 godzin i 1 minutę
+  cancelReservation
+    √ odrzuca anulowanie rezerwacji, która już się rozpoczęła (2 ms)
+    √ podwójne anulowanie jest idempotentne i nie zmienia cancelledAt
+  ownership
+    √ obcy USER nie może pobrać ani anulować cudzej rezerwacji (1 ms)
+    √ ADMIN może anulować cudzą rezerwację
+    √ USER widzi na liście tylko swoje rezerwacje (1 ms)
+    √ USER nie może filtrować listy po userId
+  eventy
+    √ publikuje reservation.created po udanym utworzeniu rezerwacji (1 ms)
+    √ nie publikuje eventu, gdy utworzenie kończy się błędem
+    √ publikuje reservation.cancelled tylko przy pierwszym anulowaniu
+
+PASS tests/unit/eventBus.test.js
+  eventBus
+    √ błąd listenera nie trafia do kodu, który opublikował event (1 ms)
+    √ listener uruchamia się dopiero po powrocie z publish
+
+Test Suites: 3 passed, 3 total
+Tests:       35 passed, 35 total
+Snapshots:   0 total
+Time:        7.438 s, estimated 8 s
+\end{terminal}
+
+\section*{Zadanie 3 -- Docker Compose}
+
+W \texttt{Dockerfile} najpierw kopiuję \texttt{package*.json} i instaluję zależności (\texttt{npm ci --omit=dev}), a dopiero potem kod, więc zmiana w kodzie nie przebudowuje warstwy z zależnościami. Przy starcie kontenera wykonują się migracje, a dzięki \texttt{exec} proces \texttt{node} jest PID 1 i sam dostaje \texttt{SIGTERM}.
+
+\begin{terminal}
+FROM node:22-alpine
+
+WORKDIR /app
+
+COPY package*.json ./
+RUN npm ci --omit=dev
+
+COPY . .
+
+ENV NODE_ENV=production
+EXPOSE 3000
+
+CMD ["sh", "-c", "npx knex migrate:latest && exec node src/server.js"]
+\end{terminal}
+
+Plik \texttt{.dockerignore}:
+
+\begin{terminal}
+node_modules
+.env
+.git
+.github
+.idea
+.run
+tests
+coverage
+sprawozdanie
+*.pdf
+\end{terminal}
+
+Usługa \texttt{api} startuje dopiero wtedy, gdy healthcheck bazy (\texttt{pg\_isready}) zgłosi \texttt{healthy}, a dane PostgreSQL są w nazwanym wolumenie \texttt{pgdata}. W \texttt{docker-compose.yml} nie ma żadnych sekretów -- hasło bazy i \texttt{JWT\_SECRET} pochodzą z \texttt{.env}, a \texttt{DATABASE\_URL} w kontenerze wskazuje na host \texttt{db}, a nie \texttt{localhost}.
+
+\begin{terminal}
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: ${DB_NAME}
+    ports:
+      - "5434:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./docker/initdb:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d ${DB_NAME}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  api:
+    build: .
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      DATABASE_URL: postgres://${DB_USER}:${DB_PASSWORD}@db:5432/${DB_NAME}
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-15m}
+    ports:
+      - "3000:3000"
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  pgdata:
+\end{terminal}
+
+Plik \texttt{.env.example} (wzór \texttt{.env}, w repozytorium są tylko przykładowe wartości):
+
+\begin{terminal}
+NODE_ENV=development
+PORT=3000
+DB_USER=roombooking
+DB_PASSWORD=change-me
+DB_NAME=roombooking
+DATABASE_URL=postgres://roombooking:change-me@localhost:5434/roombooking
+TEST_DATABASE_URL=postgres://roombooking:change-me@localhost:5434/roombooking_test
+JWT_SECRET=replace-with-at-least-32-random-characters
+JWT_EXPIRES_IN=15m
+\end{terminal}
+
+Start od pustego wolumenu (wcześniej \texttt{docker compose down -v}). Oba kontenery działają, \texttt{db} ma status \texttt{healthy}, a w logach \texttt{api} widać wykonane migracje:
+
+\begin{terminal}
+> docker compose up -d --build
+ Image lab05-api Building
+ Image lab05-api Built
+ Network lab05_default Creating
+ Network lab05_default Created
+ Volume lab05_pgdata Creating
+ Volume lab05_pgdata Created
+ Container lab05-db-1 Creating
+ Container lab05-db-1 Created
+ Container lab05-api-1 Creating
+ Container lab05-api-1 Created
+ Container lab05-db-1 Starting
+ Container lab05-db-1 Started
+ Container lab05-db-1 Waiting
+ Container lab05-db-1 Healthy
+ Container lab05-api-1 Starting
+ Container lab05-api-1 Started
+\end{terminal}
+
+\begin{terminal}
+> docker compose ps
+NAME          IMAGE         STATUS                   PORTS
+lab05-api-1   lab05-api     Up 3 seconds             0.0.0.0:3000->3000/tcp, [::]:3000->3000/tcp
+lab05-db-1    postgres:16   Up 9 seconds (healthy)   0.0.0.0:5434->5432/tcp, [::]:5434->5432/tcp
+
+> docker compose logs api
+api-1  | Batch 1 run: 5 migrations
+api-1  | Server running on http://localhost:3000 (PostgreSQL)
+\end{terminal}
+
+Seed z kontem ADMIN da się uruchomić w działającym kontenerze:
+
+\begin{terminal}
+> docker compose exec api npx knex seed:run
+Ran 2 seed files
+\end{terminal}
+
+Aplikacja obsługuje \texttt{SIGTERM} i \texttt{SIGINT}: \texttt{server.close()} kończy trwające requesty, potem czekam na listenery eventów i zamykam pulę połączeń z bazą.
+
+\zrzut{zad3-shutdown.png}{Graceful shutdown w \texttt{src/server.js}}
+
+\texttt{docker compose down} trwa niecałe 2 sekundy, a w logach \texttt{api} widać obsługę \texttt{SIGTERM} i wyjście z kodem 0 -- Docker nie czeka 10 sekund na \texttt{SIGKILL}:
+
+\begin{terminal}
+> docker compose down
+ Container lab05-api-1 Stopping
+ Container lab05-api-1 Stopped
+ Container lab05-api-1 Removing
+ Container lab05-api-1 Removed
+ Container lab05-db-1 Stopping
+ Container lab05-db-1 Stopped
+ Container lab05-db-1 Removing
+ Container lab05-db-1 Removed
+ Network lab05_default Removing
+ Network lab05_default Removed
+(czas: 1.8 s)
+
+> docker compose logs api   (koniec logu)
+api-1  | SIGTERM received, shutting down
+api-1  | HTTP server closed, database connections closed
+api-1 exited with code 0
+\end{terminal}
+
+Sprawdzenie instrukcji z README: sklonowałem repozytorium do nowego katalogu, skopiowałem \texttt{.env.example} do \texttt{.env} i uruchomiłem \texttt{docker compose up --build} -- nic więcej:
+
+\begin{terminal}
+> git clone C:/Studia/Semestr7/ZPAI/LAB05 room-booking-api
+Cloning into 'room-booking-api'... done.
+
+> cp .env.example .env
+
+> docker compose up --build -d
+ Image room-booking-api-api Built
+ Network room-booking-api_default Created
+ Volume room-booking-api_pgdata Created
+ Container room-booking-api-db-1 Created
+ Container room-booking-api-api-1 Created
+ Container room-booking-api-db-1 Started
+ Container room-booking-api-db-1 Healthy
+ Container room-booking-api-api-1 Started
+
+> docker compose ps
+NAME                     IMAGE                  STATUS
+room-booking-api-api-1   room-booking-api-api   Up 3 seconds
+room-booking-api-db-1    postgres:16            Up 9 seconds (healthy)
+
+> docker compose logs api
+api-1  | Batch 1 run: 5 migrations
+api-1  | Server running on http://localhost:3000 (PostgreSQL)
+
+> curl http://localhost:3000/api/docs/
+HTTP 200
+> curl http://localhost:3000/api/buildings
+{"error":{"code":"UNAUTHORIZED","message":"Authentication required","requestId":"44c6b9a7-5cf9-43e3-8981-faa89bdca5b5"}}
+HTTP 401
+\end{terminal}
+
+\zrzut{zad3-swagger.png}{Swagger UI uruchomiony z kontenera -- \texttt{http://localhost:3000/api/docs}}
+
+\section*{Zadanie 4 -- Eventy i audit log}
+
+Event bus opakowuje \texttt{EventEmitter}: każdy listener uruchamia się asynchronicznie po powrocie z \texttt{publish}, a jego błąd jest łapany i trafia tylko do logu, więc nie wpływa na odpowiedź API. Metoda \texttt{drain()} czeka na listenery w trakcie pracy -- korzysta z niej graceful shutdown i testy integracyjne.
+
+\zrzut{zad4-eventbus.png}{\texttt{src/events/eventBus.js} -- izolacja błędów listenerów i \texttt{drain()}}
+
+Service publikuje \texttt{reservation.created} i \texttt{reservation.cancelled} dopiero po \texttt{await runInTransaction(...)}, czyli po \texttt{COMMIT}. Nieudana operacja (np. 409) kończy się wyjątkiem przed \texttt{publish}, a przy ponownym anulowaniu flaga \texttt{changed} zostaje \texttt{false}, więc event się nie pojawia.
+
+\zrzut{zad4-service.png}{\texttt{reservations.service.js} -- \texttt{publish} po zatwierdzeniu transakcji przy tworzeniu i anulowaniu}
+
+Listener audit logu zapisuje każdy event do tabeli \texttt{audit\_log} (payload jako \texttt{jsonb}) przez repository, a listener powiadomień dla \texttt{reservation.cancelled} sprawdza, czy anulował ADMIN cudzą rezerwację, i wtedy wypisuje \texttt{[notification] to: <email właściciela>}.
+
+\zrzut{zad4-listeners.png}{\texttt{auditListeners.js} i \texttt{notificationListeners.js}}
+
+\zrzut{zad4-migracja.png}{Migracja \texttt{20261115100000\_create\_audit\_log.js}}
+
+\texttt{GET /api/admin/audit-log} jest tylko dla ADMINa (\texttt{authorize(\textquotedbl{}ADMIN\textquotedbl{})} przy montowaniu), ma paginację i filtr \texttt{?eventType=} i sortuje od najnowszych (\texttt{created\_at desc}, potem \texttt{id desc}).
+
+\zrzut{zad4-unit-test.png}{Unit testy eventów z \texttt{jest.fn()} -- event po sukcesie, brak eventu po błędzie i przy ponownym anulowaniu}
+
+Scenariusz z pliku \texttt{audit-log.http} na stacku z Docker Compose: utworzenie rezerwacji, nieudana próba kolizji, anulowanie przez ADMINa i ponowne anulowanie:
+
+\begin{terminal}
+#1 Logowanie - ADMIN (zapisuje adminToken) => 200
+#2 Logowanie - Jakub Sosnowski, USER (zapisuje jakubToken) => 200
+#3 Scenariusz 1 - Jakub tworzy rezerwację (201, event reservation.created) => 201 | Location: /api/reservations/6
+#4 Scenariusz 2 - nieudana próba kolizji (409, bez eventu) => 409
+#5 Scenariusz 3 - ADMIN anuluje rezerwację Jakuba (200, event reservation.cancelled i powiadomienie) => 200
+#6 Scenariusz 4 - ponowne anulowanie (200, idempotentne, bez eventu) => 200
+#7 Audit log - ADMIN, od najnowszych (200) => 200
+#8 Audit log - tylko reservation.created (200) => 200
+#9 Audit log - USER (403) => 403
+\end{terminal}
+
+W \texttt{audit\_log} są dokładnie dwa wpisy -- nieudana kolizja (409) i ponowne anulowanie nie opublikowały eventu:
+
+\begin{terminal}
+roombooking=# \x
+Expanded display is on.
+roombooking=# SELECT id, event_type, payload, created_at FROM audit_log ORDER BY id;
+-[ RECORD 1 ]--------------------
+id         | 1
+event_type | reservation.created
+payload    | {"roomId": 3, "userId": 2, "endTime": "2027-01-15T12:00:00.000Z", "startTime": "2027-01-15T10:00:00.000Z", "reservationId": 6}
+created_at | 2026-11-20 13:55:52.798+00
+-[ RECORD 2 ]--------------------
+id         | 2
+event_type | reservation.cancelled
+payload    | {"roomId": 3, "userId": 2, "cancelledBy": 1, "reservationId": 6}
+created_at | 2026-11-20 13:55:52.823+00
+\end{terminal}
+
+Odpowiedź \texttt{GET /api/admin/audit-log} (ADMIN, od najnowszych):
+
+\begin{terminal}
+> GET /api/admin/audit-log   (Authorization: Bearer <token ADMINa>)
+=> 200
+{
+  "data": [
+    {
+      "id": 2,
+      "eventType": "reservation.cancelled",
+      "payload": {
+        "roomId": 3,
+        "userId": 2,
+        "cancelledBy": 1,
+        "reservationId": 6
+      },
+      "createdAt": "2026-11-20T13:55:52.823Z"
+    },
+    {
+      "id": 1,
+      "eventType": "reservation.created",
+      "payload": {
+        "roomId": 3,
+        "userId": 2,
+        "endTime": "2027-01-15T12:00:00.000Z",
+        "startTime": "2027-01-15T10:00:00.000Z",
+        "reservationId": 6
+      },
+      "createdAt": "2026-11-20T13:55:52.798Z"
+    }
+  ],
+  "meta": {
+    "page": 1,
+    "limit": 20,
+    "total": 2,
+    "totalPages": 1
+  }
+}
+\end{terminal}
+
+Powiadomienie w logach \texttt{api} po anulowaniu rezerwacji Jakuba przez ADMINa:
+
+\begin{terminal}
+> docker compose logs api | grep notification
+api-1  | [notification] to: jakub.sosnowski@example.com | your reservation #6 was cancelled by ADMIN admin@example.com
+\end{terminal}
+
+\zrzut{zad4-audit-log.png}{\texttt{GET /api/admin/audit-log} w IntelliJ -- ADMIN, od najnowszych}
+
+\zrzut{zad4-audit-403.png}{\texttt{GET /api/admin/audit-log} jako USER -- 403}
+
+Izolacja błędów: tymczasowo kazałem listenerowi audit logu rzucać wyjątek. \texttt{POST /api/reservations} nadal zwrócił 201, a błąd jest tylko w logach serwera (potem przywróciłem plik):
+
+\begin{terminal}
+> git diff src/events/auditListeners.js
+diff --git a/src/events/auditListeners.js b/src/events/auditListeners.js
+index 658be33..032c2c8 100644
+--- a/src/events/auditListeners.js
++++ b/src/events/auditListeners.js
+@@ -2,6 +2,7 @@ const { EVENT_TYPES } = require("./eventTypes");
+
+ function registerAuditListeners(eventBus, runInTransaction) {
+   async function save(event) {
++    throw new Error("audit log is unavailable");
+     await runInTransaction(({ auditLog }) => auditLog.create({
+       eventType: event.name,
+       payload: event.payload,
+
+> POST /api/reservations   (listener audit logu rzuca wyjatek)
+< 201 {"id":7,"status":"CONFIRMED","user":{"id":2,"email":"jakub.sosnowski@example.com"}}
+
+> log serwera
+Server running on http://localhost:3000 (PostgreSQL)
+[03c9eed1-5530-4c02-8990-a83daa2ba743] POST /api/auth/login -> 200 (283.8 ms)
+[event:reservation.created] handler failed Error: audit log is unavailable
+    at save (C:\Studia\Semestr7\ZPAI\LAB05\src\events\auditListeners.js:5:11)
+    at C:\Studia\Semestr7\ZPAI\LAB05\src\events\eventBus.js:15:23
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+[eeb5f251-ccc2-4712-a8d9-32431641d298] POST /api/reservations -> 201 (23.5 ms)
+\end{terminal}
+
+\section*{Zadanie 5 -- Continuous Integration w GitHub Actions}
+
+Workflow uruchamia się przy pushu na \texttt{main} i przy każdym pull requeście. PostgreSQL działa jako \texttt{services} z health checkiem, a kroki to checkout, setup Node.js z cache npm, \texttt{npm ci}, \texttt{npm test} i dodatkowo \texttt{docker build .}. W workflow nie ma sekretów -- hasło dotyczy tylko tymczasowej bazy testowej w kontenerze CI, a sekret JWT dla testów to testowa wartość z \texttt{setupEnv.js}.
+
+\begin{terminal}
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: roombooking_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+
+    env:
+      TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/roombooking_test
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - run: npm test
+
+      - name: Build Docker image
+        run: docker build -t room-booking-api .
+\end{terminal}
+
+Historia commitów pokazuje rozwój projektu od zadania 02 do 05:
+
+\begin{terminal}
+> git log --oneline
+2ea4bb5 CI w GitHub Actions: testy z PostgreSQL i budowanie obrazu Docker
+cc09420 Eventy i audit log: event bus, listenery, GET /api/admin/audit-log
+3ada749 Docker Compose: Dockerfile, healthcheck bazy, graceful shutdown i README
+6217f94 Testy integracyjne API (Supertest, osobna baza testowa)
+8c2eb94 Unit testy service rezerwacji (Jest, repositories in-memory, wstrzykniety czas)
+497dc4a Sprawozdanie z zadania 04
+5f25b6b Uzytkownicy, logowanie JWT, role i ownership, konfiguracja z Zod i Swagger UI
+fe332aa Sprawozdanie, proby lamania constraintow w psql i request z wszystkimi parametrami
+bd5b08b Blokada FOR UPDATE, exclusion constraint i skrypt double-booking
+bfe030f PostgreSQL w Dockerze, migracje i seed Knex, budynki, JOIN i paginacja
+a03b0df Room Booking API z zadania 02 jako punkt wyjscia
+\end{terminal}
+
+\zrzut{zad5-readme-badge.png}{README z badge statusu CI na GitHubie}
+
+Ochronę przez CI sprawdziłem na branchu \texttt{ci-demo}: celowo zepsułem regułę nakładania się (\texttt{<} na \texttt{<=}) i otworzyłem pull request, więc workflow skończył się na czerwono. Poprawka w tym samym PR dała zielony wynik, a potem zmergowałem PR.
+
+\zrzut{zad5-ci-czerwony.png}{Pull request z błędem -- workflow na czerwono (nie przechodzą testy przedziałów stykających się)}
+
+\zrzut{zad5-ci-zielony.png}{Ten sam pull request po poprawce -- workflow na zielono}
+
+\zrzut{zad5-pr-merged.png}{Zmergowany pull request}
+
+\zrzut{zad5-actions.png}{Lista uruchomień workflow w zakładce Actions}
+
+\end{document}

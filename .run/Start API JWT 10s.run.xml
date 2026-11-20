@@ -1,0 +1,8 @@
+<component name="ProjectRunConfigurationManager">
+  <configuration default="false" name="Start API JWT 10s" type="NodeJSConfigurationType" path-to-js-file="src/server.js" working-dir="$PROJECT_DIR$">
+    <envs>
+      <env name="JWT_EXPIRES_IN" value="10s" />
+    </envs>
+    <method v="2" />
+  </configuration>
+</component>
