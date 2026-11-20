@@ -30,56 +30,64 @@ docker compose exec api npx knex seed:run
 - logi: `docker compose logs api`, zatrzymanie: `docker compose down`
 - konta z seeda — hasła w `src/db/seeds/01_users.js`
 
-Przed scenariuszem z audit logiem zrób seed (czysty stan), a potem uruchom `audit-log.http` od góry (dwa logowania zapisują tokeny).
-
 ---
 
-## 3. Checklist zrzutów
+## 3. Checklist zrzutów (plik i dokładne linie)
+
+Każdy zakres mieści się na jednym ekranie IntelliJ. Do konkretnej linii skacze **Ctrl+G**.
 
 ### Zadanie 1 — unit testy
 
-| Plik | Co sfotografować |
-|------|------------------|
-| `zad1-setup.png` | początek `tests/unit/reservations.service.test.js`: `NOW`, `reservation()`, `booking()`, `setup()` |
-| `zad1-test-each.png` | `test.each` z nakładaniem się i przedziałami stykającymi się |
-| `zad1-uow-memory.png` | `src/db/unit-of-work.memory.js` (`createMemoryUnitOfWork(initial)`) |
+| Zrzut | Plik | Linie |
+|-------|------|-------|
+| `zad1-setup.png` | `tests/unit/reservations.service.test.js` | 1–34 |
+| `zad1-test-each.png` | `tests/unit/reservations.service.test.js` | 36–57 |
+| `zad1-uow-memory.png` | `src/db/unit-of-work.memory.js` | 1–29 (cały plik) |
 
 ### Zadanie 2 — testy integracyjne
 
-| Plik | Co sfotografować |
-|------|------------------|
-| `zad2-hooks.png` | początek `tests/integration/api.test.js`: `createApp`, warunek `_test`, `beforeAll` / `beforeEach` / `afterEach` / `afterAll` |
-| `zad2-test-post.png` | test `POST /api/reservations` (201, `Location`, rekord w bazie) |
-| `zad2-testy.png` | testy 400 z `details`, 409, 404 i pagination |
+| Zrzut | Plik | Linie |
+|-------|------|-------|
+| `zad2-app.png` | `tests/integration/api.test.js` | 1–30 |
+| `zad2-hooks.png` | `tests/integration/api.test.js` | 46–67 |
+| `zad2-test-post.png` | `tests/integration/api.test.js` | 88–113 |
+| `zad2-testy.png` | `tests/integration/api.test.js` | 115–151 |
 
 ### Zadanie 3 — Docker
 
-| Plik | Co sfotografować |
-|------|------------------|
-| `zad3-shutdown.png` | `src/server.js` — funkcja `shutdown` i `process.on("SIGTERM")` |
-| `zad3-swagger.png` | przeglądarka: Swagger UI z kontenera (`docker compose up`) |
+| Zrzut | Gdzie | Co |
+|-------|-------|----|
+| `zad3-shutdown.png` | `src/server.js` | linie 1–34 (cały plik) |
+| `zad3-swagger.png` | przeglądarka, http://localhost:3000/api/docs (API z kontenera) | góra strony: pasek adresu i tytuł z wersją 5.0.0 |
 
 ### Zadanie 4 — eventy i audit log
 
-| Plik | Co sfotografować |
-|------|------------------|
-| `zad4-eventbus.png` | `src/events/eventBus.js` |
-| `zad4-service.png` | `reservations.service.js` — `eventBus.publish` po `runInTransaction` (tworzenie i anulowanie) |
-| `zad4-listeners.png` | `src/events/auditListeners.js` i `notificationListeners.js` |
-| `zad4-migracja.png` | `src/db/migrations/20261115100000_create_audit_log.js` |
-| `zad4-unit-test.png` | `describe("eventy")` w `tests/unit/reservations.service.test.js` |
-| `zad4-audit-log.png` | HTTP: `GET /api/admin/audit-log` jako ADMIN (`audit-log.http`) |
-| `zad4-audit-403.png` | HTTP: `GET /api/admin/audit-log` jako USER (403) |
+| Zrzut | Plik | Linie |
+|-------|------|-------|
+| `zad4-eventbus.png` | `src/events/eventBus.js` | 1–34 (cały plik) |
+| `zad4-service-create.png` | `src/modules/reservations/reservations.service.js` | 71–111 |
+| `zad4-service-cancel.png` | `src/modules/reservations/reservations.service.js` | 114–149 |
+| `zad4-audit-listener.png` | `src/events/auditListeners.js` | 1–17 (cały plik) |
+| `zad4-notification-listener.png` | `src/events/notificationListeners.js` | 1–19 (cały plik) |
+| `zad4-migracja.png` | `src/db/migrations/20261115100000_create_audit_log.js` | 1–13 (cały plik) |
+| `zad4-unit-test.png` | `tests/unit/reservations.service.test.js` | 170–209 |
 
-### Zadanie 5 — GitHub Actions
+Zrzuty z `audit-log.http` (panel odpowiedzi po prawej):
 
-| Plik | Co sfotografować |
-|------|------------------|
-| `zad5-readme-badge.png` | strona repozytorium na GitHubie: README z badge CI |
-| `zad5-ci-czerwony.png` | pull request z błędem — czerwony check |
+1. Czysty stan: `docker compose exec api npx knex seed:run`.
+2. Uruchom po kolei zielonym ▶ requesty z linii **2, 15, 28, 44, 56, 60, 64**.
+3. `zad4-audit-log.png` — odpowiedź na request z linii **64** (200, dwa wpisy: najpierw `reservation.cancelled`, potem `reservation.created`).
+4. `zad4-audit-403.png` — uruchom request z linii **72** i zrób zrzut odpowiedzi (403 `FORBIDDEN`).
+
+### Zadanie 5 — GitHub Actions (przeglądarka)
+
+| Zrzut | Strona |
+|-------|--------|
+| `zad5-readme-badge.png` | https://github.com/JakubSosnowski737/ZTPAI — README z badge „CI passing” |
+| `zad5-ci-czerwony.png` | pull request z brancha `ci-demo`, zakładka **Conversation** — czerwony check na dole |
 | `zad5-ci-zielony.png` | ten sam pull request po poprawce — zielony check |
-| `zad5-pr-merged.png` | zmergowany pull request |
-| `zad5-actions.png` | zakładka **Actions** z listą uruchomień workflow |
+| `zad5-pr-merged.png` | ten sam pull request po **Merge pull request** — fioletowe „Merged” |
+| `zad5-actions.png` | https://github.com/JakubSosnowski737/ZTPAI/actions — lista uruchomień |
 
 Wyniki testów, logi Dockera, tabela `audit_log` i izolacja błędów są już w sprawozdaniu jako tekst z prawdziwych uruchomień.
 
@@ -87,22 +95,15 @@ Wyniki testów, logi Dockera, tabela `audit_log` i izolacja błędów są już w
 
 ## 4. GitHub (zadanie 5)
 
-1. Na GitHubie: **New repository**, np. `room-booking-api`, puste (bez README i .gitignore). Repozytorium prywatne → **Settings → Collaborators** → dodaj prowadzącego.
-2. W LAB05:
+Repozytorium: https://github.com/JakubSosnowski737/ZTPAI
 
-```bash
-git remote add origin https://github.com/<login>/room-booking-api.git
-git push -u origin main
-```
-
-3. W zakładce **Actions** workflow `CI` na `main` powinien skończyć się na zielono.
-4. Badge w README: `![CI](https://github.com/<login>/room-booking-api/actions/workflows/ci.yml/badge.svg)`.
-5. Ochrona przez CI:
-   - `git switch -c ci-demo`, w `overlaps` (`src/modules/reservations/reservations.service.js`) zamień `<` na `<=`, commit, `git push -u origin ci-demo`,
-   - na GitHubie **Compare & pull request** → workflow na czerwono (zrzut),
-   - przywróć `<`, commit, push do tego samego brancha → zielono (zrzut),
-   - **Merge pull request** (zrzut).
-6. W sprawozdaniu wpisz link do repozytorium i hash commita (`git rev-parse --short HEAD` po merge) w miejscach `UZUPELNIJ`.
+1. `main` jest wypchnięty, workflow `CI` w zakładce **Actions** kończy się na zielono.
+2. Ochrona przez CI:
+   - branch `ci-demo`: w `overlaps` (linia 14 `src/modules/reservations/reservations.service.js`) `<` zamienione na `<=`, `git push -u origin ci-demo`,
+   - pull request: https://github.com/JakubSosnowski737/ZTPAI/compare/main...ci-demo?expand=1 → **Create pull request** → po 1–2 minutach czerwony check (zrzut),
+   - przywrócenie `<`, commit i push do `ci-demo` → zielony check (zrzut),
+   - **Merge pull request** → **Confirm merge** (zrzut).
+3. Po merge: `git pull`, potem `git rev-parse --short HEAD` i ten hash w sprawozdaniu w miejscu `UZUPELNIJ` (linia 43).
 
 ## 5. Kompilacja sprawozdania
 
