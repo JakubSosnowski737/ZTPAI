@@ -39,7 +39,7 @@
 
 API z zadania 04 ma teraz testy automatyczne: 25 unit testów na repositories in-memory i 10 testów integracyjnych przez Supertest na osobnej bazie. Całość uruchamia się jedną komendą przez Docker Compose, a service rezerwacji publikuje eventy, które trafiają do audit logu. Przy każdym pushu na \texttt{main} i przy każdym pull requeście GitHub Actions uruchamia testy i buduje obraz Dockera.
 
-Repozytorium: \url{https://github.com/UZUPELNIJ/room-booking-api}\\
+Repozytorium: \url{https://github.com/JakubSosnowski737/ZTPAI}\\
 Oceniany commit: \texttt{UZUPELNIJ}
 
 {\small
@@ -256,11 +256,13 @@ process.env.JWT_EXPIRES_IN = "15m";
 
 Bazę testową tworzy skrypt \texttt{docker/initdb/01-create-test-db.sql} przy pierwszym starcie kontenera \texttt{db}. Schemat powstaje migracjami w \texttt{beforeAll}, przed każdym testem \texttt{TRUNCATE} czyści tabele i wstawia ADMINa, budynek i dwie sale, po każdym teście czekam na listenery eventów, a \texttt{afterAll} zamyka pulę połączeń, więc Jest nie zgłasza open handles.
 
-\zrzut{zad2-hooks.png}{Przygotowanie testów integracyjnych: \texttt{createApp()}, zabezpieczenie bazy \texttt{\_test} i hooki \texttt{beforeAll}, \texttt{beforeEach}, \texttt{afterEach}, \texttt{afterAll}}
+\zrzut{zad2-app.png}{Początek testów integracyjnych: zabezpieczenie bazy \texttt{\_test}, \texttt{createApp()} z prawdziwym event busem i funkcje pomocnicze}
 
-\zrzut{zad2-test-post.png}{Test \texttt{POST /api/reservations} -- 201, nagłówek \texttt{Location} i sprawdzenie rekordu w bazie}
+\zrzut{zad2-hooks.png}{Hooki \texttt{beforeAll}, \texttt{beforeEach}, \texttt{afterEach} i \texttt{afterAll} -- migracje, czyszczenie tabel, \texttt{drain()} i zamknięcie połączeń}
 
-\zrzut{zad2-testy.png}{Testy 400 z \texttt{details}, 409 \texttt{ROOM\_ALREADY\_BOOKED}, 404 dla cudzej rezerwacji i pagination}
+\zrzut{zad2-test-post.png}{Testy \texttt{POST /api/reservations} -- 201 z nagłówkiem \texttt{Location} i rekordem w bazie oraz 400 z \texttt{details}}
+
+\zrzut{zad2-testy.png}{Testy 409 \texttt{ROOM\_ALREADY\_BOOKED}, 404 dla cudzej rezerwacji i pagination}
 
 \texttt{npm run test:integration} działa od zera -- najpierw usunąłem i założyłem na nowo pustą bazę testową:
 
@@ -563,11 +565,15 @@ Event bus opakowuje \texttt{EventEmitter}: każdy listener uruchamia się asynch
 
 Service publikuje \texttt{reservation.created} i \texttt{reservation.cancelled} dopiero po \texttt{await runInTransaction(...)}, czyli po \texttt{COMMIT}. Nieudana operacja (np. 409) kończy się wyjątkiem przed \texttt{publish}, a przy ponownym anulowaniu flaga \texttt{changed} zostaje \texttt{false}, więc event się nie pojawia.
 
-\zrzut{zad4-service.png}{\texttt{reservations.service.js} -- \texttt{publish} po zatwierdzeniu transakcji przy tworzeniu i anulowaniu}
+\zrzut{zad4-service-create.png}{\texttt{createReservation} -- \texttt{publish} po zatwierdzeniu transakcji}
+
+\zrzut{zad4-service-cancel.png}{\texttt{cancelReservation} -- flaga \texttt{changed} i \texttt{publish} po zatwierdzeniu transakcji}
 
 Listener audit logu zapisuje każdy event do tabeli \texttt{audit\_log} (payload jako \texttt{jsonb}) przez repository, a listener powiadomień dla \texttt{reservation.cancelled} sprawdza, czy anulował ADMIN cudzą rezerwację, i wtedy wypisuje \texttt{[notification] to: <email właściciela>}.
 
-\zrzut{zad4-listeners.png}{\texttt{auditListeners.js} i \texttt{notificationListeners.js}}
+\zrzut{zad4-audit-listener.png}{\texttt{auditListeners.js} -- zapis każdego eventu do \texttt{audit\_log}}
+
+\zrzut{zad4-notification-listener.png}{\texttt{notificationListeners.js} -- powiadomienie, gdy ADMIN anuluje cudzą rezerwację}
 
 \zrzut{zad4-migracja.png}{Migracja \texttt{20261115100000\_create\_audit\_log.js}}
 
@@ -742,6 +748,8 @@ Historia commitów pokazuje rozwój projektu od zadania 02 do 05:
 
 \begin{terminal}
 > git log --oneline
+80444a9 README: badge CI i adres repozytorium
+df9c690 Sprawozdanie z zadania 05, instrukcja zrzutow i konfiguracje uruchomieniowe IntelliJ
 2ea4bb5 CI w GitHub Actions: testy z PostgreSQL i budowanie obrazu Docker
 cc09420 Eventy i audit log: event bus, listenery, GET /api/admin/audit-log
 3ada749 Docker Compose: Dockerfile, healthcheck bazy, graceful shutdown i README
