@@ -1,4 +1,6 @@
 const { NotFoundError, ConflictError, ValidationError, ForbiddenError } = require("../../errors/AppError");
+const { noopEventBus } = require("../../events/eventBus");
+const { RESERVATION_CREATED, RESERVATION_CANCELLED } = require("../../events/eventTypes");
 
 const MIN_DURATION_MS = 15 * 60 * 1000;
 const MAX_DURATION_MS = 8 * 60 * 60 * 1000;
@@ -16,7 +18,7 @@ function canAccess(reservation, currentUser) {
   return currentUser.role === "ADMIN" || reservation.userId === currentUser.id;
 }
 
-function createReservationsService({ runInTransaction, now = () => new Date() }) {
+function createReservationsService({ runInTransaction, eventBus = noopEventBus, now = () => new Date() }) {
   async function listReservations(query, currentUser) {
     const isAdmin = currentUser.role === "ADMIN";
 
@@ -66,7 +68,7 @@ function createReservationsService({ runInTransaction, now = () => new Date() })
       ]);
     }
 
-    return runInTransaction(async ({ rooms, reservations }) => {
+    const created = await runInTransaction(async ({ rooms, reservations }) => {
       const room = await rooms.findById(input.roomId);
       if (!room) throw new NotFoundError("Room");
 
@@ -97,10 +99,22 @@ function createReservationsService({ runInTransaction, now = () => new Date() })
         internalNote: "created via API v2"
       });
     });
+
+    eventBus.publish(RESERVATION_CREATED, {
+      reservationId: created.id,
+      roomId: created.roomId,
+      userId: created.userId,
+      startTime: new Date(created.startTime).toISOString(),
+      endTime: new Date(created.endTime).toISOString()
+    });
+
+    return created;
   }
 
   async function cancelReservation(id, currentUser) {
-    return runInTransaction(async ({ reservations }) => {
+    let changed = false;
+
+    const cancelled = await runInTransaction(async ({ reservations }) => {
       const reservation = await reservations.findById(id);
       if (!reservation || !canAccess(reservation, currentUser)) throw new NotFoundError("Reservation");
       const newStatus = "CANCELLED";
@@ -118,8 +132,20 @@ function createReservationsService({ runInTransaction, now = () => new Date() })
         throw new ConflictError("Reservation has already started", "RESERVATION_ALREADY_STARTED");
       }
 
+      changed = true;
       return reservations.update(id, { status: newStatus, cancelledAt: now() });
     });
+
+    if (changed) {
+      eventBus.publish(RESERVATION_CANCELLED, {
+        reservationId: cancelled.id,
+        roomId: cancelled.roomId,
+        userId: cancelled.userId,
+        cancelledBy: currentUser.id
+      });
+    }
+
+    return cancelled;
   }
 
   return { listReservations, getReservation, createReservation, cancelReservation };

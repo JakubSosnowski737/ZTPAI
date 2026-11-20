@@ -3,8 +3,10 @@ const swaggerUi = require("swagger-ui-express");
 const openapiDocument = require("./docs/openapi");
 const requestLogger = require("./middleware/requestLogger");
 const authenticate = require("./middleware/authenticate");
+const authorize = require("./middleware/authorize");
 const notFound = require("./middleware/notFound");
 const errorHandler = require("./middleware/errorHandler");
+const { noopEventBus } = require("./events/eventBus");
 const { createAuthService } = require("./modules/auth/auth.service");
 const { createAuthController } = require("./modules/auth/auth.controller");
 const { createAuthRouter } = require("./modules/auth/auth.routes");
@@ -17,8 +19,11 @@ const { createRoomsRouter } = require("./modules/rooms/rooms.routes");
 const { createReservationsService } = require("./modules/reservations/reservations.service");
 const { createReservationsController } = require("./modules/reservations/reservations.controller");
 const { createReservationsRouter } = require("./modules/reservations/reservations.routes");
+const { createAuditService } = require("./modules/audit/audit.service");
+const { createAuditController } = require("./modules/audit/audit.controller");
+const { createAuditRouter } = require("./modules/audit/audit.routes");
 
-function createApp({ config, runInTransaction }) {
+function createApp({ config, runInTransaction, eventBus = noopEventBus }) {
   const app = express();
 
   app.use(requestLogger);
@@ -33,7 +38,8 @@ function createApp({ config, runInTransaction }) {
   });
   const buildingsService = createBuildingsService({ runInTransaction });
   const roomsService = createRoomsService({ runInTransaction });
-  const reservationsService = createReservationsService({ runInTransaction });
+  const reservationsService = createReservationsService({ runInTransaction, eventBus });
+  const auditService = createAuditService({ runInTransaction });
 
   app.use("/api/docs", swaggerUi.serve, swaggerUi.setup(openapiDocument, {
     swaggerOptions: { persistAuthorization: true }
@@ -42,6 +48,7 @@ function createApp({ config, runInTransaction }) {
   app.use("/api/buildings", requireAuth, createBuildingsRouter(createBuildingsController(buildingsService)));
   app.use("/api/rooms", requireAuth, createRoomsRouter(createRoomsController(roomsService)));
   app.use("/api/reservations", requireAuth, createReservationsRouter(createReservationsController(reservationsService)));
+  app.use("/api/admin/audit-log", requireAuth, authorize("ADMIN"), createAuditRouter(createAuditController(auditService)));
 
   app.use(notFound);
   app.use(errorHandler);
