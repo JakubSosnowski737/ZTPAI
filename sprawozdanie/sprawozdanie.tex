@@ -40,7 +40,7 @@
 API z zadania 04 ma teraz testy automatyczne: 25 unit testów na repositories in-memory i 10 testów integracyjnych przez Supertest na osobnej bazie. Całość uruchamia się jedną komendą przez Docker Compose, a service rezerwacji publikuje eventy, które trafiają do audit logu. Przy każdym pushu na \texttt{main} i przy każdym pull requeście GitHub Actions uruchamia testy i buduje obraz Dockera.
 
 Repozytorium: \url{https://github.com/JakubSosnowski737/ZTPAI}\\
-Oceniany commit: \texttt{3c8e018} (merge pull requesta z demonstracją CI)
+Oceniany commit: \texttt{1dfbb0a}
 
 {\small
 \begin{verbatim}
@@ -748,6 +748,8 @@ Historia commitów pokazuje rozwój projektu od zadania 02 do 05:
 
 \begin{terminal}
 > git log --oneline
+1dfbb0a Update README.md
+6117cfe Sprawozdanie: oceniany commit i historia po merge PR
 3c8e018 Merge pull request #1 from JakubSosnowski737/ci-demo
 0d6b875 CI demo: poprawka overlaps (przywrocone <)
 d60b361 CI demo: celowy blad w overlaps (<= zamiast <)
