@@ -9,8 +9,8 @@ const credentials = { email: "jakub.sosnowski@example.com", password: "jakub-pas
 const body = {
   roomId: 3,
   participants: 10,
-  startTime: "2026-11-20T10:00:00Z",
-  endTime: "2026-11-20T12:00:00Z"
+  startTime: "2027-01-20T10:00:00Z",
+  endTime: "2027-01-20T12:00:00Z"
 };
 
 async function login() {

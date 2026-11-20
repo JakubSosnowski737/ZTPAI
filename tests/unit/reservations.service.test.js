@@ -28,8 +28,9 @@ function booking(startTime, endTime, overrides = {}) {
 
 function setup(reservations = [], now = () => NOW) {
   const { runInTransaction } = createMemoryUnitOfWork({ reservations });
-  const service = createReservationsService({ runInTransaction, now });
-  return { service };
+  const eventBus = { publish: jest.fn(), subscribe: jest.fn() };
+  const service = createReservationsService({ runInTransaction, eventBus, now });
+  return { service, eventBus };
 }
 
 describe("createReservation - nakładanie się rezerwacji", () => {
@@ -163,5 +164,46 @@ describe("ownership", () => {
 
     await expect(service.listReservations({ page: 1, limit: 20, sort: "startTime", userId: jakub.id }, anna))
       .rejects.toMatchObject({ code: "FORBIDDEN" });
+  });
+});
+
+describe("eventy", () => {
+  test("publikuje reservation.created po udanym utworzeniu rezerwacji", async () => {
+    const { service, eventBus } = setup();
+
+    const created = await service.createReservation(booking("2026-11-20T10:00:00Z", "2026-11-20T12:00:00Z"), jakub);
+
+    expect(eventBus.publish).toHaveBeenCalledTimes(1);
+    expect(eventBus.publish).toHaveBeenCalledWith("reservation.created", {
+      reservationId: created.id,
+      roomId: 1,
+      userId: jakub.id,
+      startTime: "2026-11-20T10:00:00.000Z",
+      endTime: "2026-11-20T12:00:00.000Z"
+    });
+  });
+
+  test("nie publikuje eventu, gdy utworzenie kończy się błędem", async () => {
+    const { service, eventBus } = setup([reservation(1)]);
+
+    await expect(service.createReservation(booking("2026-11-10T11:00:00Z", "2026-11-10T13:00:00Z"), anna))
+      .rejects.toMatchObject({ code: "ROOM_ALREADY_BOOKED" });
+
+    expect(eventBus.publish).not.toHaveBeenCalled();
+  });
+
+  test("publikuje reservation.cancelled tylko przy pierwszym anulowaniu", async () => {
+    const { service, eventBus } = setup([reservation(1)]);
+
+    await service.cancelReservation(1, admin);
+    await service.cancelReservation(1, admin);
+
+    expect(eventBus.publish).toHaveBeenCalledTimes(1);
+    expect(eventBus.publish).toHaveBeenCalledWith("reservation.cancelled", {
+      reservationId: 1,
+      roomId: 1,
+      userId: jakub.id,
+      cancelledBy: admin.id
+    });
   });
 });
