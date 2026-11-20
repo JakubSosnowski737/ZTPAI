@@ -3,7 +3,7 @@
 ![CI](https://github.com/JakubSosnowski737/ZTPAI/actions/workflows/ci.yml/badge.svg)
 
 API do rezerwacji sal w budynkach: Express 5, Zod, PostgreSQL 16, Knex, JWT, Swagger UI.
-Projekt z laboratoriów ZPAI (Jakub Sosnowski 151935).
+zadanie z laboratoriów ZPAI (Jakub Sosnowski 151935).
 
 ## Uruchomienie od zera (Docker)
 
