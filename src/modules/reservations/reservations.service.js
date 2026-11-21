@@ -11,7 +11,7 @@ const ALLOWED_TRANSITIONS = {
 };
 
 function overlaps(a, b) {
-  return a.startTime.getTime() <= b.endTime.getTime() && b.startTime.getTime() <= a.endTime.getTime();
+  return a.startTime.getTime() < b.endTime.getTime() && b.startTime.getTime() < a.endTime.getTime();
 }
 
 function canAccess(reservation, currentUser) {
