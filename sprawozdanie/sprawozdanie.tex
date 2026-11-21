@@ -369,7 +369,7 @@ Time:        7.438 s, estimated 8 s
 
 \section*{Zadanie 3 -- Docker Compose}
 
-W \texttt{Dockerfile} najpierw kopiuję \texttt{package*.json} i instaluję zależności (\texttt{npm ci --omit=dev}), a dopiero potem kod, więc zmiana w kodzie nie przebudowuje warstwy z zależnościami. Przy starcie kontenera wykonują się migracje, a dzięki \texttt{exec} proces \texttt{node} jest PID 1 i sam dostaje \texttt{SIGTERM}.
+W \texttt{Dockerfile} najpierw kopiuję \texttt{package*.json} i instaluję zależności (\texttt{npm ci -{}-omit=dev}), a dopiero potem kod, więc zmiana w kodzie nie przebudowuje warstwy z zależnościami. Przy starcie kontenera wykonują się migracje, a dzięki \texttt{exec} proces \texttt{node} jest PID 1 i sam dostaje \texttt{SIGTERM}.
 
 \begin{terminal}
 FROM node:22-alpine
@@ -521,7 +521,7 @@ api-1  | HTTP server closed, database connections closed
 api-1 exited with code 0
 \end{terminal}
 
-Sprawdzenie instrukcji z README: sklonowałem repozytorium do nowego katalogu, skopiowałem \texttt{.env.example} do \texttt{.env} i uruchomiłem \texttt{docker compose up --build} -- nic więcej:
+Sprawdzenie instrukcji z README: sklonowałem repozytorium do nowego katalogu, skopiowałem \texttt{.env.example} do \texttt{.env} i uruchomiłem \texttt{docker compose up -{}-build} -- nic więcej:
 
 \begin{terminal}
 > git clone C:/Studia/Semestr7/ZPAI/LAB05 room-booking-api
